@@ -3,12 +3,12 @@
 import React, { useState, useEffect } from 'react';
 import QuestionScreen from '@/components/QuestionScreen';
 import SummaryScreen from '@/components/SummaryScreen';
-import { Question } from '@/types/quiz';
+import { PublicQuestion } from '@/types/quiz';
 import { getDailyQuestions } from '@/services/quizService';
 import { Loader2 } from 'lucide-react';
 
 export default function QuizContainer() {
-  const [questions, setQuestions] = useState<Question[]>([]);
+  const [questions, setQuestions] = useState<PublicQuestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);

@@ -1,10 +1,22 @@
-import { supabase } from '@/lib/supabase';
-import { Question } from '@/types/quiz';
+// Plik: src/services/quizService.ts
 
-export async function getDailyQuestions(): Promise<Question[] | null> {
+import { supabase } from '@/lib/supabase';
+import { PublicQuestion } from '@/types/quiz';
+
+/**
+ * POBIERANIE CODZIENNEGO QUIZU
+ *
+ * SECURITY:
+ * correct_index NIGDY nie jest pobierany z bazy
+ * w tym zapytaniu.
+ *
+ * Dzięki temu przeglądarka nie zna poprawnych odpowiedzi
+ * przed udzieleniem odpowiedzi przez użytkownika.
+ */
+export async function getDailyQuestions(): Promise<PublicQuestion[] | null> {
   const today = new Date().toISOString().split('T')[0];
 
-  // 1. Get the challenge for today
+  // Pobieramy dzisiejsze wyzwanie.
   const { data: challenge, error: challengeError } = await supabase
     .from('daily_challenges')
     .select('question_ids')
@@ -16,10 +28,19 @@ export async function getDailyQuestions(): Promise<Question[] | null> {
     return null;
   }
 
-  // 2. Get the actual questions using the IDs from the challenge
+  // UWAGA:
+  // correct_index CELOWO nie znajduje się w SELECT.
   const { data: questions, error: questionsError } = await supabase
     .from('questions')
-    .select('*')
+    .select(`
+      id,
+      category,
+      difficulty,
+      question,
+      options,
+      explanation,
+      tags
+    `)
     .in('id', challenge.question_ids);
 
   if (questionsError || !questions) {
@@ -27,50 +48,46 @@ export async function getDailyQuestions(): Promise<Question[] | null> {
     return null;
   }
 
-  // Sort questions to match the order in question_ids array
+  // Przywracamy kolejność z daily_challenges.question_ids.
   const sortedQuestions = challenge.question_ids
-    .map(id => questions.find(q => q.id === id))
-    .filter(Boolean) as Question[];
+    .map((id) => questions.find((question) => question.id === id))
+    .filter((question): question is PublicQuestion => Boolean(question));
 
   return sortedQuestions;
 }
 
-export async function saveQuizResult(result: {
-  username?: string;
-  score: number;
-  total_questions: number;
-  answers_pattern: string;
-  completion_time_seconds?: number;
-}) {
-  const { data, error } = await supabase
-    .from('quiz_results')
-    .insert([result]);
 
-  if (error) {
-    console.error('Error saving result:', error);
-  }
-  return { data, error };
-}
-
+/**
+ * LEADERBOARD
+ *
+ * Pobieramy tylko publiczne informacje potrzebne
+ * do wyświetlenia rankingu.
+ */
 export interface LeaderboardEntry {
   id?: string;
   username: string;
   score: number;
   total_questions: number;
-  completion_time_seconds?: number;
-  created_at?: string;
+  time_taken?: number;
+  played_at?: string;
 }
 
 export async function getTodayLeaderboard(): Promise<LeaderboardEntry[]> {
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  const today = new Date().toISOString().split('T')[0];
 
   const { data, error } = await supabase
     .from('quiz_results')
-    .select('*')
-    .gte('created_at', todayStart.toISOString())
+    .select(`
+      id,
+      username,
+      score,
+      total_questions,
+      time_taken,
+      played_at
+    `)
+    .eq('played_at', today)
     .order('score', { ascending: false })
-    .order('completion_time_seconds', { ascending: true })
+    .order('time_taken', { ascending: true })
     .limit(10);
 
   if (error) {
@@ -79,4 +96,35 @@ export async function getTodayLeaderboard(): Promise<LeaderboardEntry[]> {
   }
 
   return data as LeaderboardEntry[];
+}
+
+
+/**
+ * ZAPIS WYNIKU
+ *
+ * Wynik NIE jest zapisywany bezpośrednio do Supabase
+ * z przeglądarki.
+ *
+ * Przeglądarka wysyła dane do naszego endpointu API,
+ * a backend zajmuje się zapisem i walidacją.
+ */
+export async function saveQuizResult(result: {
+  username?: string;
+  score: number;
+  total_questions: number;
+  answers_pattern: string;
+}) {
+  const response = await fetch('/api/quiz/result', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(result),
+  });
+
+  if (!response.ok) {
+    throw new Error('Nie udało się zapisać wyniku.');
+  }
+
+  return await response.json();
 }
