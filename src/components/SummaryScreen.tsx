@@ -11,7 +11,8 @@ interface SummaryScreenProps {
   score: number;
   totalQuestions: number;
   answers: boolean[]; // true = correct, false = incorrect/skipped
-  onRestart: () => void;
+  onRestart?: () => void;
+  attemptState?: 'ready_to_finish' | 'completed';
   alreadyCompleted: boolean;
 }
 
@@ -20,25 +21,27 @@ export default function SummaryScreen({
   score,
   totalQuestions,
   answers,
-  onRestart
+  onRestart,
+  attemptState
 }: SummaryScreenProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
-  const canSave = submittedAnswers !== null && submittedAnswers.length === totalQuestions;
+  const canSave = !attemptState && submittedAnswers !== null && submittedAnswers.length === totalQuestions;
   const [saved, setSaved] = useState(false);
   const [username, setUsername] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
+    if (attemptState) return;
     // Automatyczny zapis anonimowy lub pod podaną nazwą
     const savedName = localStorage.getItem('footquiz_username');
     if (savedName) {
       setUsername(savedName);
     }
-  }, []);
+  }, [attemptState]);
 
   const handleSaveResult = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || saved || !canSave || !submittedAnswers) return;
+    if (attemptState || !username.trim() || saved || !canSave || !submittedAnswers) return;
     setIsSubmitting(true);
     setSaveError(null);
     try {
@@ -115,7 +118,13 @@ export default function SummaryScreen({
 
       {/* Save Result Form */}
       {saveError && <p role="alert">{saveError}</p>}
-      {!canSave ? (
+      {attemptState ? (
+        <p className="mb-6 text-sm text-slate-600">
+          {attemptState === 'completed'
+            ? 'Wynik tej próby został zapisany.'
+            : 'Odpowiedzi zostały zapisane. Wynik oczekuje na finalizację, która nie jest jeszcze dostępna.'}
+        </p>
+      ) : !canSave ? (
         <p className="mb-6 text-sm text-slate-500">Ten lokalny wynik nie zawiera kompletu wyborów potrzebnych do zapisu.</p>
       ) : !saved ? (
         <form onSubmit={handleSaveResult} className="w-full mb-6">
@@ -158,14 +167,14 @@ export default function SummaryScreen({
           Udostępnij wynik
         </button>
 
-        <div className="grid grid-cols-2 gap-3">
-          <button
+        <div className={attemptState ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
+          {!attemptState && onRestart && <button
             onClick={onRestart}
             className="bg-white border-2 border-slate-200 hover:border-slate-300 text-slate-700 py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
           >
             <RotateCcw size={18} />
             Powtórz
-          </button>
+          </button>}
           <Link
             href="/"
             className="bg-white border-2 border-slate-200 hover:border-slate-300 text-slate-700 py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.98]"

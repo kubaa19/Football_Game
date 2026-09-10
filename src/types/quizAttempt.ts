@@ -27,3 +27,15 @@ export interface QuizAttemptStartResponse {
   nextQuestionId: string | null;
   result: QuizAttemptResult | null;
 }
+export interface QuizAttemptAnswerRequest {
+  attemptId: string;
+  questionId: string;
+  selectedIndex: number;
+}
+
+export interface QuizAnswerFeedback {
+  correct: boolean;
+  correctIndex: number;
+  explanation: string;
+  replayed: boolean;
+}

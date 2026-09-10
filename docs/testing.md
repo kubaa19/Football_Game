@@ -182,8 +182,6 @@ The following scenarios have not yet been manually/runtime tested and must not b
 - simultaneous/concurrent requests from separate sessions;
 - forced rollback/atomicity failure scenario;
 - completed-attempt resume response;
-- full browser UI integration with `attemptId`;
-- frontend resume from persisted server answers;
 - server-side finalization through `finish_quiz_attempt` in the product flow.
 
 ## 5. Current checkpoint
@@ -199,4 +197,62 @@ At this checkpoint, the following are verified in the development environment:
 - questions outside the challenge are rejected;
 - correct, incorrect and timeout answers produce the expected feedback.
 
-The frontend is **not yet integrated with the new `attemptId` answer contract**. The current UI therefore does not yet represent an end-to-end product test of the new attempt architecture. Result finalization is also still a separate future stage.
+The frontend is now integrated with the `attemptId` answer contract and server-persisted resume flow. Result finalization through `finish_quiz_attempt` remains a separate future stage.
+
+
+## 6. Stage 3 — frontend integration with quiz attempts
+
+### Automated verification — PASS
+
+After the frontend integration was implemented:
+
+- full TypeScript typecheck — **PASS**;
+- `npm.cmd run build` — **PASS**;
+- local test script — **28/28 PASS**;
+- `git diff --check` — **PASS**.
+
+The local tests used mocks and did not perform HTTP requests or Supabase mutations. They covered resume validation, shared in-flight attempt start, answer/replay contract, error handling, and rendering of both attempt summary states.
+
+Exactly five application files were changed in this stage:
+
+- `src/app/quiz/page.tsx`;
+- `src/components/QuestionScreen.tsx`;
+- `src/components/SummaryScreen.tsx`;
+- `src/services/quizService.ts`;
+- `src/types/quizAttempt.ts`.
+
+No SQL, RPC, result endpoint or `saveQuizResult` changes were part of Stage 3.
+
+### Manual browser verification — PASS
+
+The following browser flows were manually confirmed:
+
+- normal answer → feedback → “Next” transition;
+- after two persisted answers, F5 resumed at question 3;
+- F5 while feedback for question 3 was visible resumed at question 4, the first unanswered question;
+- after all five answers, the summary rendered correctly in `ready_to_finish`;
+- the attempts summary did not expose the legacy “Repeat” action or use the legacy result-save flow.
+
+This confirms the tested frontend path uses server-persisted attempt answers as the source of truth for resume. This stage intentionally does **not** call `finish_quiz_attempt`, so `ready_to_finish` must not be interpreted as `completed`.
+
+## 7. Checkpoint after Stage 3
+
+Verified at this checkpoint:
+
+- anonymous attempt start/resume works;
+- answers are persisted server-side before feedback;
+- accepted answers are immutable in the tested API flow;
+- identical retries are idempotent;
+- the frontend sends `attemptId` with answers;
+- server-persisted answers are the source of truth for browser resume;
+- refresh after persisted answers resumes at the first unanswered question;
+- legacy local completion data no longer controls active quiz progress;
+- the five-answer flow reaches `ready_to_finish` without calling the old result-save flow.
+
+Still pending:
+
+- product integration of `finish_quiz_attempt`;
+- transition from `ready_to_finish` to `completed`;
+- completed-attempt resume through the final product flow;
+- manual coverage of remaining cookie/Origin/network/concurrency edge cases;
+- isolated concurrency and injected-failure atomicity tests.
