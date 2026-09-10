@@ -8,7 +8,7 @@ interface QuestionScreenProps {
   question: PublicQuestion;
   questionNumber: number;
   totalQuestions: number;
-  onNext: (isCorrect: boolean) => void;
+  onNext: (isCorrect: boolean, selectedIndex: number) => void;
   timeLimit?: number;
 }
 
@@ -28,13 +28,12 @@ export default function QuestionScreen({
   // SECURITY:
   // Nie porównujemy tutaj selectedOption z correct_index,
   // ponieważ correct_index NIE znajduje się już w przeglądarce.
+  const [explanation, setExplanation] = useState('');
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
 
   // Zapamiętujemy indeks poprawnej odpowiedzi WYŁĄCZNIE
   // po otrzymaniu informacji od backendu.
   //
-  // Backend zwraca na razie tylko true/false, więc nie znamy
-  // jeszcze indeksu poprawnej odpowiedzi.
   const [correctAnswerIndex, setCorrectAnswerIndex] = useState<number | null>(null);
 
   // Zapobiega wielokrotnemu wysłaniu odpowiedzi.
@@ -83,14 +82,8 @@ export default function QuestionScreen({
       const result = await response.json();
 
       setIsCorrect(result.correct);
-
-      // UWAGA:
-      // Na obecnym etapie backend zwraca tylko true/false.
-      // Dlatego nie znamy indeksu poprawnej odpowiedzi.
-      //
-      // W następnym kroku zmienimy endpoint tak,
-      // aby zwracał bezpiecznie informację potrzebną
-      // do pokazania poprawnej odpowiedzi użytkownikowi.
+      setExplanation(result.explanation);
+      setCorrectAnswerIndex(result.correctIndex);
       setIsLocked(true);
 
     } catch (error) {
@@ -101,6 +94,7 @@ export default function QuestionScreen({
       setIsLocked(false);
       setSelectedOption(null);
       setIsCorrect(null);
+      setExplanation('');
 
       alert('Nie udało się sprawdzić odpowiedzi. Spróbuj ponownie.');
     } finally {
@@ -239,12 +233,12 @@ export default function QuestionScreen({
             </p>
 
             <p className="text-sm text-slate-600 leading-relaxed">
-              {question.explanation}
+              {explanation}
             </p>
           </div>
 
           <button
-            onClick={() => onNext(isCorrect)}
+            onClick={() => onNext(isCorrect, selectedOption ?? -1)}
             className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition-colors"
           >
             {questionNumber === totalQuestions

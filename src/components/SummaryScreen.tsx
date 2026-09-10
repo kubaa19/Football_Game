@@ -3,21 +3,27 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Share2, RotateCcw, Home, CheckCircle2 } from 'lucide-react';
+import type { QuizAnswer } from '@/types/quiz';
 import { saveQuizResult } from '@/services/quizService';
 
 interface SummaryScreenProps {
+  submittedAnswers: QuizAnswer[] | null;
   score: number;
   totalQuestions: number;
   answers: boolean[]; // true = correct, false = incorrect/skipped
   onRestart: () => void;
+  alreadyCompleted: boolean;
 }
 
 export default function SummaryScreen({
+  submittedAnswers,
   score,
   totalQuestions,
   answers,
   onRestart
 }: SummaryScreenProps) {
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const canSave = submittedAnswers !== null && submittedAnswers.length === totalQuestions;
   const [saved, setSaved] = useState(false);
   const [username, setUsername] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -32,21 +38,18 @@ export default function SummaryScreen({
 
   const handleSaveResult = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || saved) return;
-
+    if (!username.trim() || saved || !canSave || !submittedAnswers) return;
     setIsSubmitting(true);
-    localStorage.setItem('footquiz_username', username.trim());
-
-    const pattern = answers.map(a => (a ? '1' : '0')).join('');
-    await saveQuizResult({
-      username: username.trim(),
-      score,
-      total_questions: totalQuestions,
-      answers_pattern: pattern
-    });
-
-    setSaved(true);
-    setIsSubmitting(false);
+    setSaveError(null);
+    try {
+      localStorage.setItem('footquiz_username', username.trim());
+      await saveQuizResult({ username: username.trim(), answers: submittedAnswers });
+      setSaved(true);
+    } catch {
+      setSaveError('Nie udało się zapisać wyniku. Spróbuj ponownie.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Funkcja generująca kafelki w stylu Wordle
@@ -111,7 +114,10 @@ export default function SummaryScreen({
       </div>
 
       {/* Save Result Form */}
-      {!saved ? (
+      {saveError && <p role="alert">{saveError}</p>}
+      {!canSave ? (
+        <p className="mb-6 text-sm text-slate-500">Ten lokalny wynik nie zawiera kompletu wyborów potrzebnych do zapisu.</p>
+      ) : !saved ? (
         <form onSubmit={handleSaveResult} className="w-full mb-6">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
             Zapisz wynik do tabeli liderów

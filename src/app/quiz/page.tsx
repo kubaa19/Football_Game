@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import QuestionScreen from '@/components/QuestionScreen';
 import SummaryScreen from '@/components/SummaryScreen';
-import { PublicQuestion } from '@/types/quiz';
+import { PublicQuestion, QuizAnswer } from '@/types/quiz';
 import { getDailyQuestions } from '@/services/quizService';
 import { Loader2 } from 'lucide-react';
 
@@ -13,6 +13,7 @@ export default function QuizContainer() {
   const [error, setError] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<boolean[]>([]);
+  const [submittedAnswers, setSubmittedAnswers] = useState<QuizAnswer[] | null>(null);
   const [isFinished, setIsFinished] = useState(false);
   const [alreadyCompleted, setAlreadyCompleted] = useState(false);
 
@@ -30,6 +31,10 @@ export default function QuizContainer() {
           try {
             const parsed = JSON.parse(savedResult);
             setAnswers(parsed.answers || []);
+            const stored = parsed.submittedAnswers;
+            setSubmittedAnswers(Array.isArray(stored) && stored.length === parsed.answers?.length && stored.every(a =>
+              a && typeof a.questionId === 'string' && Number.isInteger(a.selectedIndex) && a.selectedIndex >= -1 && a.selectedIndex <= 3
+            ) ? stored : null);
             setIsFinished(true);
             setAlreadyCompleted(true);
           } catch (e) {
@@ -54,7 +59,11 @@ export default function QuizContainer() {
     loadQuestionsAndState();
   }, [storageKey]);
 
-  const handleAnswer = (isCorrect: boolean) => {
+  const handleAnswer = (isCorrect: boolean, selectedIndex: number) => {
+    const questionId = questions[currentIndex].id;
+    if (!questionId) return;
+    const newSubmittedAnswers = [...(submittedAnswers ?? []), { questionId, selectedIndex }];
+    setSubmittedAnswers(newSubmittedAnswers);
     const newAnswers = [...answers, isCorrect];
     setAnswers(newAnswers);
 
@@ -70,6 +79,7 @@ export default function QuizContainer() {
           score,
           totalQuestions: questions.length,
           answers: newAnswers,
+          submittedAnswers: newSubmittedAnswers,
           completedAt: new Date().toISOString()
         })
       );
@@ -79,6 +89,7 @@ export default function QuizContainer() {
   const restartQuiz = () => {
     setCurrentIndex(0);
     setAnswers([]);
+    setSubmittedAnswers(null);
     setIsFinished(false);
   };
 
@@ -131,6 +142,7 @@ export default function QuizContainer() {
             score={score}
             totalQuestions={questions.length || 5}
             answers={answers}
+            submittedAnswers={submittedAnswers}
             onRestart={restartQuiz}
             alreadyCompleted={alreadyCompleted}
           />

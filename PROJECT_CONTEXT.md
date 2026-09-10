@@ -8,11 +8,21 @@
 - **Strategia dystrybucji i promocji organicznej:** Zob. dedykowany dokument `docs/MARKETING_STRATEGY.md` (formaty wiralowe na X, WhatsApp Share, TikTok, fora klubowe).
 ---
 
-## 2. Architektura techniczna
-- **Frontend:** Next.js (App Router), React, Tailwind CSS, shadcn/ui.
-- **Backend & Auth:** Supabase (PostgreSQL + Auth Google/Email + Row-Level Security).
-- **Logika gry & Bezpieczeństwo:** Walidacja odpowiedzi po stronie serwera (Next.js Server Actions). Pole correct_index nigdy nie trafia do przeglądarki gracza przed udzieleniem odpowiedzi.
-- **Płatności (od Etapu 3):** Merchant of Record (Paddle / Lemon Squeezy) lub Stripe Checkout.
+## 2. Aktualna architektura techniczna
+
+Stan implementacji: 2026-09-10. Zakres docelowy MVP opisuje sekcja 4; nie jest on listą gotowych funkcji.
+
+- **Frontend:** Next.js 16.3.4 (App Router), React 19.2.8, TypeScript 7.0.2 i Tailwind CSS 4.3.3 według lockfile. Własne komponenty i Lucide; shadcn/ui nie jest wdrożone. TypeScript: `strict`, `target: ES2017`, `moduleResolution: bundler`. Tailwind przez `@tailwindcss/postcss` i import CSS.
+- **Backend:** Next.js Route Handlers/API, nie Server Actions. `GET /api/quiz/daily`, `POST /api/quiz/answer` oraz obie trasy zapisu (`/api/quiz/result`, `/quiz/result`) korzystają z Supabase po stronie serwera przez `SUPABASE_SECRET_KEY`.
+- **Baza:** lokalny `supabase/schema.sql` definiuje `questions`, `daily_challenges`, `quiz_results`. Nie definiuje `profiles` ani `daily_scores`. Wyniki są zapisywane ze zwalidowanym nickiem; bez powiązania z zalogowanym użytkownikiem.
+- **Auth i RLS:** logowanie Google/Email nie jest wdrożone. Repozytorium nie zawiera kompletnego, wersjonowanego zestawu polityk RLS i grantów. W ramach aktualizacji dokumentacji nie audytowano zdalnych polityk Supabase; lokalny schemat nie potwierdza ich stanu.
+- **Daily Quiz:** dzień liczony w UTC, kolejność według `daily_challenges.question_ids`, timer klienta 15 s. API wymaga kompletnego zestawu, ale nie wymusza dokładnie pięciu pytań. Brak automatycznego tworzenia dziennych zestawów.
+- **Odpowiedzi i wynik:** GET nie zwraca `correct_index` ani `explanation`. Endpoint odpowiedzi ujawnia `correctIndex` i wyjaśnienie po przesłaniu wyboru, również przy timeoutcie `-1`. Wspólny serwerowy `saveQuizResult` oblicza wynik z przesłanych wyborów; nie potwierdza, że są to pierwsze odpowiedzi gracza.
+- **Stan interfejsu:** ranking TOP 10 (cel TOP 50); `time_taken` nie jest zapisywany. Streak `1` i rekord `5/5` na stronie głównej są placeholderami. Podsumowanie i udostępnianie używają lokalnych danych. Brak serwerowej sesji próby i ochrony przed wielokrotnym zapisem.
+- **Pozostały dostęp Supabase:** ranking nadal czyta `quiz_results` bezpośrednio z klienta, a admin próbuje bezpośrednio dodawać pytania. Admin nie ma kontroli roli ani logowania w kodzie.
+- **Analityka:** niewdrożona; istnieje tylko niewykorzystywany helper `trackEvent`.
+
+Szczegóły: [Daily Quiz](docs/specs/daily-quiz.md), [bezpieczeństwo i dostęp do danych](docs/specs/security-and-data-access.md), [walidacja pytań](docs/specs/question-validation.md).
 
 ---
 
@@ -24,7 +34,9 @@
 
 ---
 
-## 4. Zakres MVP (Co wchodzi vs Co wycinamy)
+## 4. Docelowy zakres MVP (Co wchodzi vs Co wycinamy)
+
+Poniższa tabela opisuje cel produktu. Nie oznacza, że wszystkie funkcje są wdrożone; stan obecny znajduje się w sekcji 2 i statusach roadmapy.
 
 | Co WCHODZI do MVP (v0.1) | Co WYCINAMY do wersji późniejszych (v0.2+) |
 | :--- | :--- |
@@ -40,12 +52,12 @@
 ## 5. Plan wdrożenia iteracyjnego (Roadmapa dla Continue)
 
 ### Etap 1: Walidacja pętli gry (MVP v0.1)
-- [ ] 1.1. Baza danych i Auth: Konfiguracja tabel w Supabase (profiles, questions, daily_challenges, daily_scores) z aktywnym RLS oraz logowania Google.
-- [ ] 1.2. Ekran Pytania: Komponent interfejsu pojedynczego pytania w Next.js (timer 10s, pasek postępu 1/5, warianty A/B/C/D, blokada kliknięć, stan zielony/czerwony, feedback edukacyjny).
-- [ ] 1.3. Pętla sesji dziennej: Przeprowadzenie gracza przez 5 pytań z rzędu z zapisem wyniku (score, time_spent) przez Server Action.
-- [ ] 1.4. Ekran podsumowania i virality: Ekran końcowy z podsumowaniem, aktualizacją passy (streak 🔥) oraz generatorem kafelków do schowka: FootQuiz #142: 4/5 ⏱️ 24.8s 🟩🟩🟥🟩🟩 Pobijesz mnie? footquiz.pl.
-- [ ] 1.5. Tabela wyników (Leaderboard): Dobowy ranking TOP 50 graczy wg liczby trafień i czasu odpowiedzi.
-- [ ] 1.6. Analityka bezciasteczkowa (Privacy-First): Wdrożenie Vercel Analytics + śledzenie zdarzeń (quiz_started, quiz_completed, result_shared) oraz obsługa parametrów UTM (WhatsApp, X, fora) bez konieczności banera cookies. Szczegóły: zobacz plik `docs/specs/analytics-specification.md`.
+- [ ] 1.1. Baza danych i Auth — **częściowo**. Działają `questions`, `daily_challenges`, `quiz_results` i integracja Supabase. Brak profili, logowania Google/Email oraz kompletnego, wersjonowanego RLS/grantów. `daily_scores` było nazwą planowaną; obecna tabela to `quiz_results`.
+- [ ] 1.2. Ekran Pytania — **częściowo** względem pierwotnego zakresu. Działają postęp, opcje, blokada kliknięć, feedback i podświetlenie odpowiedzi. Obecny timer to 15 s, nie planowane 10 s; brak etykiet A/B/C/D. Timer nie jest weryfikowany przez serwer.
+- [ ] 1.3. Pętla dzienna — **częściowo**. Działa pobieranie zestawu, przechodzenie pytań i zapis wyniku przez Route Handlers ze wspólną funkcją serwerową. Brak zapisu `time_taken`, wymuszenia pięciu pytań i serwerowej próby. Pierwotnie planowano Server Action i pole `time_spent`.
+- [ ] 1.4. Podsumowanie i virality — **częściowo**. Działają podsumowanie, kafelki, Web Share i schowek. Brak rzeczywistego streaka, czasu oraz numeru wyzwania w docelowym formacie udostępniania.
+- [ ] 1.5. Ranking — **częściowo**. Obecnie TOP 10; cel to TOP 50 według trafień i czasu. Zapytanie sortuje także po `time_taken`, ale aplikacja nie zapisuje tego pola.
+- [ ] 1.6. Analityka — **niewykonane**. Brak integracji Vercel Analytics/Umami/PostHog, wywołań zdarzeń i UTM w udostępnianiu. Istnieje tylko helper. Plan: `src/docs/specs/analytics-specification.md`.
 
 ### Etap 2: Grywalizacja i retencja w stylu Duolingo (v0.2)
 - [ ] 2.1. Cotygodniowe 30-osobowe Ligi: Dynamiczne grupowanie graczy w ligach (B-Klasa do Ligi Mistrzów) z mechaniką awansów (TOP 5) i spadków (Bottom 5) w każdą niedzielę.
@@ -86,5 +98,15 @@ Pojedynczy rekord w bazie i seedzie danych:
 - tags: string[]
 
 Pliki pomocnicze w projekcie:
-- Prompt do zasilania bazy pytań: scripts/prompts/questions-generator.txt
-- Skrypt walidacyjny (Sanity-Check): scripts/validate-questions.js
+- Prompt do zasilania bazy pytań: src/scripts/question-generator.txt
+- Skrypt walidacyjny (Sanity-Check): src/scripts/prompts/validate-questions.js
+
+### Pipeline jakości pytań
+
+`generator → walidacja techniczna → ręczna kontrola merytoryczna → import do Supabase`
+
+- Generator: `src/scripts/question-generator.txt`.
+- Walidator techniczny: `src/scripts/prompts/validate-questions.js`.
+- Specyfikacja i decyzje projektowe: `docs/specs/question-validation.md`.
+
+**Przejście validate-questions.js NIE oznacza potwierdzenia poprawności merytorycznej.** Na MVP każde pytanie wymaga ręcznej kontroli faktów przed importem. Automatyczny Etap 2 pozostaje planowany; wrócimy do niego, gdy ręczna kontrola stanie się wąskim gardłem.

@@ -12,7 +12,6 @@ export interface PublicQuestion {
   difficulty: number;
   question: string;
   options: string[];
-  explanation: string;
   tags: string[];
 }
 
@@ -25,6 +24,7 @@ export interface PublicQuestion {
  */
 export interface Question extends PublicQuestion {
   correct_index: number;
+  explanation: string;
 }
 
 export interface QuizState {
@@ -32,4 +32,13 @@ export interface QuizState {
   score: number;
   answers: (number | null)[];
   isFinished: boolean;
+}
+export interface QuizAnswer {
+  questionId: string;
+  selectedIndex: number;
+}
+
+export interface QuizResultRequest {
+  username: string;
+  answers: QuizAnswer[];
 }

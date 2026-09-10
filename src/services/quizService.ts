@@ -1,7 +1,7 @@
 // Plik: src/services/quizService.ts
 
 import { supabase } from '@/lib/supabase';
-import { PublicQuestion } from '@/types/quiz';
+import { PublicQuestion, QuizResultRequest } from '@/types/quiz';
 
 /**
  * POBIERANIE CODZIENNEGO QUIZU
@@ -14,46 +14,14 @@ import { PublicQuestion } from '@/types/quiz';
  * przed udzieleniem odpowiedzi przez użytkownika.
  */
 export async function getDailyQuestions(): Promise<PublicQuestion[] | null> {
-  const today = new Date().toISOString().split('T')[0];
-
-  // Pobieramy dzisiejsze wyzwanie.
-  const { data: challenge, error: challengeError } = await supabase
-    .from('daily_challenges')
-    .select('question_ids')
-    .eq('date', today)
-    .single();
-
-  if (challengeError || !challenge) {
-    console.error('Error fetching daily challenge:', challengeError);
+  try {
+    const response = await fetch('/api/quiz/daily', { cache: 'no-store' });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching daily questions:', error);
     return null;
   }
-
-  // UWAGA:
-  // correct_index CELOWO nie znajduje się w SELECT.
-  const { data: questions, error: questionsError } = await supabase
-    .from('questions')
-    .select(`
-      id,
-      category,
-      difficulty,
-      question,
-      options,
-      explanation,
-      tags
-    `)
-    .in('id', challenge.question_ids);
-
-  if (questionsError || !questions) {
-    console.error('Error fetching questions:', questionsError);
-    return null;
-  }
-
-  // Przywracamy kolejność z daily_challenges.question_ids.
-  const sortedQuestions = challenge.question_ids
-    .map((id) => questions.find((question) => question.id === id))
-    .filter((question): question is PublicQuestion => Boolean(question));
-
-  return sortedQuestions;
 }
 
 
@@ -108,12 +76,7 @@ export async function getTodayLeaderboard(): Promise<LeaderboardEntry[]> {
  * Przeglądarka wysyła dane do naszego endpointu API,
  * a backend zajmuje się zapisem i walidacją.
  */
-export async function saveQuizResult(result: {
-  username?: string;
-  score: number;
-  total_questions: number;
-  answers_pattern: string;
-}) {
+export async function saveQuizResult(result: QuizResultRequest) {
   const response = await fetch('/api/quiz/result', {
     method: 'POST',
     headers: {
