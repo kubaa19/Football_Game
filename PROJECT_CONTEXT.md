@@ -24,6 +24,15 @@ Stan implementacji: 2026-09-10. Zakres docelowy MVP opisuje sekcja 4; nie jest o
 
 Szczegóły: [Daily Quiz](docs/specs/daily-quiz.md), [bezpieczeństwo i dostęp do danych](docs/specs/security-and-data-access.md), [walidacja pytań](docs/specs/question-validation.md).
 
+### Quiz attempts — warstwa DB gotowa, integracja aplikacji przed nami
+
+- Migracja `supabase/migrations/20260910120000_quiz_attempts.sql` została wykonana bez błędu na developerskim Supabase. Dodaje `quiz_attempts`, `quiz_attempt_answers` oraz nullable `quiz_results.attempt_id` z FK i UNIQUE. Lokalne `schema.sql` nie zawiera tych dodatków; opisuje je migracja.
+- RPC `record_quiz_attempt_answer(...)` zapisuje pierwszy zaakceptowany wybór przed zwróceniem feedbacku; odpowiedź jest projektowo immutable. `finish_quiz_attempt(...)` liczy wynik z utrwalonych odpowiedzi i transakcyjnie zapisuje `quiz_result` oraz kończy próbę. Nowe tabele mają RLS i brak dostępu `anon`/`authenticated`; RPC są przeznaczone dla `service_role`.
+- **Frontend i istniejące API nie korzystają jeszcze z quiz_attempts. Stare flow nadal działa.** Nie jest to pełne wdrożenie produktowe ani ochrona obecnego flow przed poprawianiem wyborów i wielokrotnym zapisem.
+- **Testy wykonane na developerskim Supabase:** `supabase/tests/quiz_attempts.sql` zakończył się bez błędu, potwierdzając m.in. constraints, odpowiedzi, timeout, kolejność, retry, finalizację, score/pattern, RLS i uprawnienia. Dodatkowo zweryfikowano końcowy ROLLBACK: oryginalny challenge wrócił na `2026-09-10`, a `fixture_questions = 0`, `fixture_attempts = 0`, `fixture_results = 0`.
+- **Testy niewykonane:** współbieżność z dwóch niezależnych połączeń oraz injected-failure rollback pomiędzy INSERT `quiz_results` a UPDATE `completed_at`. Procedury: `supabase/tests/quiz_attempts-concurrency.md`. Wymagają izolowanej bazy i trwałych osobnych połączeń; wykonamy je później na lokalnym PostgreSQL/Supabase. Nie traktujemy ich jako potwierdzonych przez dotychczasowe testy ani przez zwykły końcowy ROLLBACK.
+- **Następny etap:** anonimowa tożsamość przez HttpOnly cookie i `POST /api/quiz/attempt/start`; później przełączenie answer/result na `attemptId` i odpowiedzi utrwalane na serwerze.
+
 ---
 
 ## 3. Inspiracje Duolingo (Mechanizmy Psychologiczne)
