@@ -14,6 +14,16 @@ interface SummaryScreenProps {
   onRestart?: () => void;
   attemptState?: 'ready_to_finish' | 'completed';
   alreadyCompleted: boolean;
+  onFinish?: (username: string) => Promise<void>;
+  finishPending?: boolean;
+  finishError?: string | null;
+  finishRetryable?: boolean;
+  lockedUsername?: string | null;
+  finishConfirmed?: boolean;
+  finishSyncing?: boolean;
+  finishSyncError?: string | null;
+  resultUsername?: string;
+  onFinishSynchronize?: () => void;
 }
 
 export default function SummaryScreen({
@@ -22,7 +32,10 @@ export default function SummaryScreen({
   totalQuestions,
   answers,
   onRestart,
-  attemptState
+  attemptState,
+  onFinish, finishPending = false, finishError, finishRetryable = false,
+  lockedUsername = null, finishConfirmed = false, finishSyncing = false,
+  finishSyncError, resultUsername, onFinishSynchronize,
 }: SummaryScreenProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const canSave = !attemptState && submittedAnswers !== null && submittedAnswers.length === totalQuestions;
@@ -31,14 +44,12 @@ export default function SummaryScreen({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (attemptState) return;
-    // Automatyczny zapis anonimowy lub pod podaną nazwą
-    const savedName = localStorage.getItem('footquiz_username');
-    if (savedName) {
-      setUsername(savedName);
-    }
+    if (attemptState === 'completed') return;
+    try {
+      const savedName = localStorage.getItem('footquiz_username');
+      if (savedName) setUsername(savedName);
+    } catch { /* A preference must not block finalization. */ }
   }, [attemptState]);
-
   const handleSaveResult = async (e: React.FormEvent) => {
     e.preventDefault();
     if (attemptState || !username.trim() || saved || !canSave || !submittedAnswers) return;
@@ -119,11 +130,43 @@ export default function SummaryScreen({
       {/* Save Result Form */}
       {saveError && <p role="alert">{saveError}</p>}
       {attemptState ? (
-        <p className="mb-6 text-sm text-slate-600">
-          {attemptState === 'completed'
-            ? 'Wynik tej próby został zapisany.'
-            : 'Odpowiedzi zostały zapisane. Wynik oczekuje na finalizację, która nie jest jeszcze dostępna.'}
-        </p>
+        <>
+          {attemptState === 'completed' || finishConfirmed ? (
+            <p className="mb-6 text-sm text-green-700">
+              Wynik tej próby został zapisany{resultUsername ? ' jako ' + resultUsername : ''}.
+            </p>
+          ) : (
+            <form onSubmit={event => {
+              event.preventDefault();
+              if (!finishPending && (lockedUsername === null || finishRetryable)) {
+                void onFinish?.(lockedUsername ?? username.trim());
+              }
+            }} className="w-full mb-6">
+              <label htmlFor="attempt-username" className="block mb-2 text-sm font-bold">Twój nick</label>
+              <input id="attempt-username" value={lockedUsername ?? username}
+                onChange={event => setUsername(event.target.value)}
+                disabled={finishPending || lockedUsername !== null}
+                required
+                className="w-full rounded-xl bg-slate-100 p-3 mb-3" />
+              <button type="submit"
+                disabled={!onFinish || finishPending ||
+                  (lockedUsername !== null ? !finishRetryable :
+                    !username.trim() || Array.from(username.trim()).length > 20)}
+                className="w-full rounded-xl bg-blue-600 text-white p-3 font-bold disabled:opacity-50">
+                {finishPending ? 'Zapisujemy...' : lockedUsername !== null ? 'Ponów zapis z tym samym nickiem' : 'Zapisz wynik'}
+              </button>
+              {finishError && <p role="alert" className="mt-3 text-red-700">{finishError}</p>}
+            </form>
+          )}
+          {finishSyncing && <p role="status">Wynik zapisany. Odświeżamy stan próby...</p>}
+          {finishSyncError && <p role="alert" className="mb-3">{finishSyncError}</p>}
+          {(finishSyncError || (finishError && !finishPending)) && (
+            <button onClick={onFinishSynchronize} disabled={finishSyncing}
+              className="mb-6 w-full rounded-xl border p-3">
+              Ponów synchronizację
+            </button>
+          )}
+        </>
       ) : !canSave ? (
         <p className="mb-6 text-sm text-slate-500">Ten lokalny wynik nie zawiera kompletu wyborów potrzebnych do zapisu.</p>
       ) : !saved ? (

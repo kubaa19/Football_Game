@@ -4,7 +4,7 @@ This document records tests that have actually been executed for FootQuiz. It is
 
 ## Test environment
 
-- Test date: 2026-09-10
+- Initial test date: 2026-09-10; Stage 4 manual results reported on 2026-09-11.
 - Environment: development / MVP
 - Database: development Supabase project
 - Production was not used.
@@ -176,13 +176,11 @@ The following scenarios have not yet been manually/runtime tested and must not b
 - invalid JSON and invalid request shapes;
 - extra request fields and query parameters;
 - `QUESTION_OUT_OF_ORDER` runtime response;
-- attempt owned by another anonymous identity;
+- attempt owned by another anonymous identity on /api/quiz/answer (finish protection is verified in Stage 4);
 - `ATTEMPT_COMPLETED` behavior;
 - `ATTEMPT_EXPIRED` behavior;
 - simultaneous/concurrent requests from separate sessions;
 - forced rollback/atomicity failure scenario;
-- completed-attempt resume response;
-- server-side finalization through `finish_quiz_attempt` in the product flow.
 
 ## 5. Current checkpoint
 
@@ -197,7 +195,7 @@ At this checkpoint, the following are verified in the development environment:
 - questions outside the challenge are rejected;
 - correct, incorrect and timeout answers produce the expected feedback.
 
-The frontend is now integrated with the `attemptId` answer contract and server-persisted resume flow. Result finalization through `finish_quiz_attempt` remains a separate future stage.
+The frontend is now integrated with the `attemptId` answer contract and server-persisted resume flow. Result finalization was still pending at this checkpoint; see section 8 for completed Stage 4 verification.
 
 
 ## 6. Stage 3 — frontend integration with quiz attempts
@@ -249,10 +247,105 @@ Verified at this checkpoint:
 - legacy local completion data no longer controls active quiz progress;
 - the five-answer flow reaches `ready_to_finish` without calling the old result-save flow.
 
-Still pending:
+Pending at the Stage 3 checkpoint (historical; Stage 4 completion is recorded in section 8):
 
 - product integration of `finish_quiz_attempt`;
 - transition from `ready_to_finish` to `completed`;
 - completed-attempt resume through the final product flow;
 - manual coverage of remaining cookie/Origin/network/concurrency edge cases;
 - isolated concurrency and injected-failure atomicity tests.
+
+## 8. Stage 4 - quiz-attempt finalization
+
+**The basic Stage 4 / quiz-attempt finalization flow is complete and manually verified.** The manual results below were reported by the project owner; this documentation update did not rerun HTTP requests or SQL.
+
+### Implementation
+
+- Added `POST /api/quiz/attempt/finish`; the JSON request contains exactly `{ attemptId, username }`.
+- Username is required, trimmed, and limited to 20 Unicode code points.
+- The endpoint requires a valid same-origin Origin, using the configured trusted origin policy.
+- Finish uses the existing anonymous identity from the HttpOnly cookie. It neither creates nor refreshes the identity/cookie; the owner hash is derived exclusively on the server.
+- Its only database call is the `finish_quiz_attempt` RPC.
+- The database calculates score, totalQuestions and answersPattern from persisted answers; these values are not accepted from the client.
+- PostgreSQL atomically inserts the result and updates `completed_at`. A retry of a completed attempt returns the existing quiz_result idempotently.
+- In `ready_to_finish`, the frontend offers a username form and result-save action. This state does not itself mean completed.
+- After confirmed finish, the frontend synchronizes through `/api/quiz/attempt/start`. Finish does not return or synthesize completedAt; the complete state and timestamp come from resume.
+- A failed resync after confirmed finish preserves the saved result and offers synchronization retry, without restoring the finalization form.
+- `completed` displays the server result without a form or Repeat action.
+- `footquiz_username` remains only a UX preference; localStorage is not authoritative for results or progress.
+- Legacy `/api/quiz/result` and `/quiz/result` remain reachable, but the current Daily Quiz attempts flow does not use them. Cleanup/decommission is a separate future step.
+
+### Automated verification - PASS
+
+- Full TypeScript typecheck - **PASS**.
+- `npm.cmd run build` - **PASS**.
+- **53 mocked tests - PASS**.
+- `git diff --check` - **PASS**.
+
+The mocked tests cover request/identity validation, RPC error mapping, safe result mapping, retry payload preservation, duplicate-submit protection, and retaining confirmed results after resync/localStorage failures. They do not prove real database concurrency or forced rollback behavior.
+
+### Manual Stage 4 tests - PASS
+
+#### 1. Happy path finalization - PASS
+
+- The completed attempt was saved with username `Kuba`.
+- The UI displayed confirmation that the result was saved.
+
+#### 2. Completed resume - PASS
+
+- F5 after finalization kept the user on the completed result screen.
+- The result was restored from server state.
+
+#### 3. Idempotent finish retry - PASS
+
+Attempt ID: `e4d286e7-0a40-4122-b63a-916943c23a85`.
+
+A repeated POST to `/api/quiz/attempt/finish` returned:
+
+- HTTP `200`;
+- `replayed: true`;
+- result ID: `fc5569a6-a82e-4714-a157-061d7128478f`;
+- score: `2`;
+- totalQuestions: `5`;
+- answersPattern: `10001`;
+- username: `Kuba`.
+
+#### 4. No duplicate quiz_result - PASS
+
+An SQL lookup by attempt_id `e4d286e7-0a40-4122-b63a-916943c23a85` returned exactly **1 record**. This confirms the tested sequential retry, not two-session concurrency.
+
+#### 5. Incomplete attempt protection - PASS
+
+Attempt ID: `03730f15-8465-4ce4-ab16-4429e792a4f9`.
+
+Finish before all questions were answered returned:
+
+- HTTP `409`;
+- `error.code: ATTEMPT_INCOMPLETE`.
+
+#### 6. Foreign owner protection - PASS
+
+Finish from Edge for an attempt belonging to the anonymous Chrome identity returned:
+
+- HTTP `403`;
+- `error.code: ATTEMPT_FORBIDDEN`.
+
+#### 7. Missing anonymous cookie - PASS
+
+POST finish with `credentials: omit` returned:
+
+- HTTP `401`;
+- `error.code: ANONYMOUS_IDENTITY_REQUIRED`.
+
+### Known / deferred
+
+The basic finalization flow is verified; the following are not marked complete:
+
+- Real two-session DB concurrency tests.
+- Forced failure/rollback between INSERT quiz_results and UPDATE completed_at. Procedures remain in `supabase/tests/quiz_attempts-concurrency.md`.
+- Cookie reset/incognito bypass remains an accepted MVP limitation.
+- The timer remains client-side and resets on refresh for an unresolved question.
+- UTC day boundaries remain a known limitation: start targets today's challenge; an open attempt from a previous UTC day cannot be finalized.
+- Cleanup/decommission of the legacy result routes is deferred.
+
+The remaining Origin, malformed-cookie and network edge cases are not promoted to manually verified by these seven tests.

@@ -1,3 +1,4 @@
+import type { QuizAttemptFinishRequest, QuizAttemptFinishResponse } from '@/types/quizAttempt';
 import type { QuizAttemptAnswerRequest, QuizAnswerFeedback, QuizAttemptStartResponse } from '@/types/quizAttempt';
 // Plik: src/services/quizService.ts
 
@@ -184,4 +185,29 @@ export function validateAttemptResume(value: unknown, daily: PublicQuestion[] | 
       state.completedAt !== null || state.result !== null) return invalid();
 
   return { attempt: state, questions: daily as (PublicQuestion & { id: string })[] };
+}
+
+export async function finishQuizAttempt(input: QuizAttemptFinishRequest): Promise<QuizAttemptFinishResponse> {
+  const data = await readQuizResponse(await fetch('/api/quiz/attempt/finish', {
+    method: 'POST',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  }));
+  const value = data as QuizAttemptFinishResponse | null;
+  const result = value?.result;
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      value.attemptId !== input.attemptId || typeof value.replayed !== 'boolean' ||
+      !result || typeof result !== 'object' || Array.isArray(result) ||
+      typeof result.id !== 'string' || !result.id ||
+      typeof result.username !== 'string' || !result.username.trim() ||
+      typeof result.playedAt !== 'string' ||
+      !Number.isInteger(result.score) || !Number.isInteger(result.totalQuestions) ||
+      result.totalQuestions < 1 || result.score < 0 || result.score > result.totalQuestions ||
+      typeof result.answersPattern !== 'string' ||
+      result.answersPattern.length !== result.totalQuestions || /[^01]/.test(result.answersPattern)) {
+    throw new QuizApiError('INVALID_RESPONSE');
+  }
+  return value;
 }

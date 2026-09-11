@@ -16,11 +16,11 @@
 
 **## 2. Aktualna architektura techniczna**
 
-Stan implementacji: 2026-09-10. Zakres docelowy MVP opisuje sekcja 4; nie jest on listą gotowych funkcji.
+Stan implementacji: 2026-09-11. Zakres docelowy MVP opisuje sekcja 4; nie jest on listą gotowych funkcji.
 
 \- **\*\*Frontend:\*\*** Next.js 16.3.4 (App Router), React 19.2.8, TypeScript 7.0.2 i Tailwind CSS 4.3.3 według lockfile. Własne komponenty i Lucide; shadcn/ui nie jest wdrożone. TypeScript: \`strict\`, \`target: ES2017\`, \`moduleResolution: bundler\`. Tailwind przez \`@tailwindcss/postcss\` i import CSS.
 
-\- **\*\*Backend:\*\*** Next.js Route Handlers/API, nie Server Actions. \`GET /api/quiz/daily\`, \`POST /api/quiz/attempt/start\` i \`POST /api/quiz/answer\` korzystają z Supabase po stronie serwera przez \`SUPABASE\_SECRET\_KEY\`. Stare trasy zapisu wyniku (\`/api/quiz/result\`, \`/quiz/result\`) nadal istnieją, ale nowy flow attempts nie wywołuje ich.
+\- **\*\*Backend:\*\*** Next.js Route Handlers/API, nie Server Actions. \`GET /api/quiz/daily\`, \`POST /api/quiz/attempt/start\`, \`POST /api/quiz/answer\` i \`POST /api/quiz/attempt/finish\` korzystają z Supabase po stronie serwera przez \`SUPABASE\_SECRET\_KEY\`. Legacy \`/api/quiz/result\` oraz \`/quiz/result\` nadal są osiągalne, ale aktualny Daily Quiz attempts flow ich nie używa.
 
 \- **\*\*Baza:\*\*** lokalny \`supabase/schema.sql\` definiuje \`questions\`, \`daily\_challenges\`, \`quiz\_results\`. Nie definiuje \`profiles\` ani \`daily\_scores\`. Wyniki są zapisywane ze zwalidowanym nickiem; bez powiązania z zalogowanym użytkownikiem.
 
@@ -28,9 +28,9 @@ Stan implementacji: 2026-09-10. Zakres docelowy MVP opisuje sekcja 4; nie jest o
 
 \- **\*\*Daily Quiz:\*\*** dzień liczony w UTC, kolejność według \`daily\_challenges.question\_ids\`, timer klienta 15 s. API wymaga kompletnego zestawu, ale nie wymusza dokładnie pięciu pytań. Brak automatycznego tworzenia dziennych zestawów.
 
-\- **\*\*Odpowiedzi i wynik:\*\*** GET nie zwraca \`correct\_index\` ani \`explanation\`. Nowy flow tworzy/wznawia próbę przez \`POST /api/quiz/attempt/start\`; \`POST /api/quiz/answer\` wymaga \`attemptId\` i utrwala pierwszą zaakceptowaną odpowiedź przez RPC przed zwróceniem feedbacku. \`ready_to_finish\` nie finalizuje jeszcze wyniku. Stary \`saveQuizResult\` nadal istnieje, ale nie jest używany przez nowy frontend attempts.
+\- **\*\*Odpowiedzi i wynik:\*\*** GET nie zwraca \`correct\_index\` ani \`explanation\`. Start/resume odtwarza próbę, a answer utrwala pierwszy wybór przez RPC przed feedbackiem. \`ready_to_finish\` umożliwia zapis przez \`POST /api/quiz/attempt/finish\`; DB oblicza score, totalQuestions i answersPattern wyłącznie z zapisanych odpowiedzi. Stary \`saveQuizResult\` pozostaje poza nowym flow.
 
-\- **\*\*Stan interfejsu:\*\*** frontend Daily Quiz jest zintegrowany z serwerową próbą: start/resume pochodzi z \`/api/quiz/attempt/start\`, odpowiedzi z serwera są źródłem prawdy, a stare lokalne wyniki nie sterują postępem. Po 5 odpowiedziach UI pokazuje \`ready_to_finish\` bez starego zapisu i bez opcji „Powtórz”. Ranking nadal jest TOP 10 (cel TOP 50); \`time_taken\` nie jest zapisywany. Streak \`1\` i rekord \`5/5\` na stronie głównej pozostają placeholderami.
+\- **\*\*Stan interfejsu:\*\*** frontend odtwarza próbę i odpowiedzi z serwera; localStorage nie steruje postępem. \`ready_to_finish\` pokazuje formularz nicku i zapis wyniku, a \`completed\` wynik serwerowy bez formularza ani "Powtórz". Ranking nadal jest TOP 10 (cel TOP 50); \`time_taken\` nie jest zapisywany. Streak \`1\` i rekord \`5/5\` na stronie głównej pozostają placeholderami.
 
 \- **\*\*Pozostały dostęp Supabase:\*\*** ranking nadal czyta \`quiz\_results\` bezpośrednio z klienta, a admin próbuje bezpośrednio dodawać pytania. Admin nie ma kontroli roli ani logowania w kodzie.
 
@@ -38,11 +38,11 @@ Stan implementacji: 2026-09-10. Zakres docelowy MVP opisuje sekcja 4; nie jest o
 
 Szczegóły: [Daily Quiz]\(docs/specs/daily-quiz.md), [bezpieczeństwo i dostęp do danych]\(docs/specs/security-and-data-access.md), [walidacja pytań]\(docs/specs/question-validation.md).
 
-**### Quiz attempts — DB + start/answer API + frontend integration gotowe; finalizacja przed nami**
+**### Quiz attempts - Stage 4: podstawowy flow finalizacji ukończony i ręcznie zweryfikowany**
 
 \- Migracja \`supabase/migrations/20260910120000_quiz_attempts.sql\` została wykonana bez błędu na developerskim Supabase. Dodaje \`quiz_attempts\`, \`quiz_attempt_answers\` oraz nullable \`quiz_results.attempt_id\` z FK i UNIQUE. Lokalne \`schema.sql\` nie zawiera tych dodatków; opisuje je migracja.
 
-\- RPC \`record_quiz_attempt_answer(...)\` zapisuje pierwszy zaakceptowany wybór przed zwróceniem feedbacku; odpowiedź jest projektowo immutable. Identyczny retry jest idempotentny. \`finish_quiz_attempt(...)\` jest już zaimplementowane w DB i potrafi transakcyjnie policzyć wynik z utrwalonych odpowiedzi, zapisać \`quiz_result\` oraz zakończyć próbę, ale **nie jest jeszcze podłączone do flow aplikacji**.
+\- RPC \`record_quiz_attempt_answer(...)\` utrwala pierwszy zaakceptowany wybór przed feedbackiem; identyczny retry jest idempotentny. Podłączone do aplikacji \`finish_quiz_attempt(...)\` atomowo oblicza wynik z zapisanych odpowiedzi, zapisuje \`quiz_result\` i ustawia \`completed_at\` w PostgreSQL. Retry zakończonego attemptu zwraca istniejący wynik.
 
 \- Anonimowa tożsamość działa przez HttpOnly cookie i jego SHA-256 hash przechowywany po stronie serwera. \`POST /api/quiz/attempt/start\` tworzy albo wznawia próbę i zwraca autorytatywny stan: \`attemptId\`, kolejność pytań, utrwalone odpowiedzi, \`nextQuestionId\`, stan próby i — dla zakończonej próby — wynik.
 
@@ -52,13 +52,19 @@ Szczegóły: [Daily Quiz]\(docs/specs/daily-quiz.md), [bezpieczeństwo i dostęp
 
 \- \`QuestionScreen\` zapisuje odpowiedź z \`attemptId\`; potwierdzona odpowiedź trafia do stanu po sukcesie \`/answer\`, a „Następne” jedynie zmienia ekran. \`replayed=true\` jest traktowane jak zwykły sukces bez podwójnego naliczenia.
 
-\- Po komplecie odpowiedzi stan \`ready_to_finish\` pokazuje podsumowanie, ale nie udaje \`completed\`. W trybie attempts \`SummaryScreen\` nie wywołuje starego endpointu wyniku i nie pokazuje „Powtórz”. **Brakującym elementem jest podłączenie finalizacji do \`finish_quiz_attempt\`.**
+\- **\*\*Stage 4 - finalizacja:\*\*** \`POST /api/quiz/attempt/finish\` przyjmuje dokładnie \`{ attemptId, username }\`. Username jest wymagany, trimowany i ograniczony do 20 punktów kodowych Unicode. Endpoint wymaga poprawnego same-origin Origin, używa istniejącego HttpOnly cookie i nie tworzy ani nie odświeża identity. Owner hash jest wyliczany wyłącznie na serwerze. Jedynym wywołaniem DB jest RPC \`finish_quiz_attempt\`; klient nie podaje score, totalQuestions ani answersPattern.
+
+\- Po potwierdzonym finish frontend zachowuje zapisany wynik i synchronizuje próbę przez \`/api/quiz/attempt/start\`. Dopiero resume dostarcza pełny \`completed\` i \`completedAt\`; finish nie syntetyzuje timestampu. Błąd resync nie przywraca formularza i pozwala ponowić synchronizację. \`footquiz_username\` pozostaje wyłącznie preferencją UX.
+
+\- **\*\*Weryfikacja Stage 4:\*\*** full TypeScript typecheck PASS, \`npm.cmd run build\` PASS, 53 mocked tests PASS, \`git diff --check\` PASS. Zgodnie z raportem właściciela projektu ręcznie potwierdzono: zapis jako Kuba i potwierdzenie UI, F5 na completed z wynikiem serwerowym, retry HTTP 200 / replayed=true z tym samym wynikiem, dokładnie jeden quiz_result, ATTEMPT_INCOMPLETE (409), ATTEMPT_FORBIDDEN dla obcej identity (403) i ANONYMOUS_IDENTITY_REQUIRED bez cookie (401). Podstawowy flow finalizacji jest ukończony i ręcznie zweryfikowany. Identyfikatory prób/wyniku i szczegóły: \`docs/testing.md\`, sekcja 8.
 
 \- **\*\*Weryfikacja Etapu 3:\*\*** pełny typecheck PASS, \`npm.cmd run build\` PASS, lokalny zestaw testów 28/28 PASS oraz \`git diff --check\` bez błędów. Manualnie potwierdzono: normalny answer/feedback/next, resume po F5 po dwóch odpowiedziach, F5 podczas feedbacku przechodzące do pierwszego nierozwiązanego pytania oraz dojście do 5/5 z poprawnym podsumowaniem \`ready_to_finish\`, bez starego zapisu wyniku i bez „Powtórz”. Szczegóły: \`docs/testing.md\`.
 
-\- **\*\*Testy nadal niewykonane / odłożone:\*\*** m.in. pełna macierz błędów cookie/Origin/request, rzeczywista współbieżność dwóch niezależnych sesji, injected-failure rollback między INSERT \`quiz_results\` a UPDATE \`completed_at\`, część scenariuszy utraty sieci/timera i produktowa finalizacja przez \`finish_quiz_attempt\`. Testy współbieżności/atomicity wymagające izolowanej bazy pozostają odłożone.
+\- **\*\*Testy nadal niewykonane / odłożone:\*\*** rzeczywista współbieżność dwóch niezależnych sesji DB oraz forced failure/rollback pomiędzy INSERT \`quiz_results\` a UPDATE \`completed_at\` nie zostały potwierdzone. Procedury: \`supabase/tests/quiz_attempts-concurrency.md\`. Pozostała macierz błędów Origin/cookie i utraty sieci nadal wymaga pokrycia manualnego.
 
-\- **\*\*Następny etap:\*\*** dodać bezpieczny endpoint finalizacji próby oparty na \`finish_quiz_attempt\`, podłączyć \`ready_to_finish → completed\`, a następnie przetestować idempotentną finalizację i resume zakończonej próby.
+\- **\*\*Znane ograniczenia MVP:\*\*** reset cookie/incognito może utworzyć nową identity; timer jest klientowy i resetuje się po refresh nierozwiązanego pytania; granica dnia UTC pozostaje ograniczeniem (start dotyczy dzisiejszego zestawu, otwarta próba z poprzedniego dnia wygasa).
+
+\- **\*\*Następny osobny etap:\*\*** cleanup/decommission legacy \`/api/quiz/result\` i \`/quiz/result\`. Nadal są osiągalne, choć nowy Daily Quiz attempts flow ich nie wywołuje. Testy współbieżności i wymuszonego rollbacku pozostają odłożone.
 
 \---
 
@@ -104,7 +110,7 @@ Poniższa tabela opisuje cel produktu. Nie oznacza, że wszystkie funkcje są wd
 
 \- [ ] 1.2. Ekran Pytania — **\*\*częściowo\*\*** względem pierwotnego zakresu. Działają postęp, opcje, blokada kliknięć, feedback i podświetlenie odpowiedzi. Obecny timer to 15 s, nie planowane 10 s; brak etykiet A/B/C/D. Timer nie jest weryfikowany przez serwer.
 
-\- [ ] 1.3. Pętla dzienna — **\*\*częściowo\*\***. Działają pobieranie zestawu, serwerowa próba anonimowa, start/resume oraz immutable zapis pierwszych odpowiedzi przez Route Handlers + RPC. Frontend odtwarza postęp z serwera. Brak jeszcze produktowej finalizacji przez \`finish_quiz_attempt\`, zapisu \`time_taken\` i wymuszenia dokładnie pięciu pytań przez API.
+\- [ ] 1.3. Pętla dzienna - **\*\*częściowo\*\***. Działają pobieranie zestawu, anonimowa próba, start/resume, immutable odpowiedzi oraz atomowa finalizacja przez Route Handlers + RPC \`finish_quiz_attempt\`. Podstawowy Stage 4 i completed resume są ręcznie zweryfikowane. Nadal brak zapisu \`time_taken\` i wymuszenia dokładnie pięciu pytań przez API.
 
 \- [ ] 1.4. Podsumowanie i virality — **\*\*częściowo\*\***. Działają podsumowanie, kafelki, Web Share i schowek. Brak rzeczywistego streaka, czasu oraz numeru wyzwania w docelowym formacie udostępniania.
 

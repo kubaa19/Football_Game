@@ -39,3 +39,14 @@ export interface QuizAnswerFeedback {
   explanation: string;
   replayed: boolean;
 }
+
+export interface QuizAttemptFinishRequest {
+  attemptId: string;
+  username: string;
+}
+
+export interface QuizAttemptFinishResponse {
+  attemptId: string;
+  result: QuizAttemptResult;
+  replayed: boolean;
+}
