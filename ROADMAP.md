@@ -66,33 +66,29 @@ Ranking:
 # 3. Soft-launch path
 
 ## Stage 6 — Automatic Daily Challenge
-**Status: NEXT**
+**Status: DONE**
 
 ### Cel
 FootQuiz ma działać następnego dnia bez ręcznego INSERT w Supabase.
 
-### Minimalny zakres
-- automatyczne utworzenie/publikacja `daily_challenges`,
-- dokładnie 5 pytań,
-- unikalne `question_ids`,
-- brak zmiany zestawu już opublikowanego dnia,
-- idempotentny retry,
-- kontrolowany fallback ręczny,
-- czytelny komunikat UI, gdy quiz nie jest dostępny,
-- możliwość przygotowania challenge'ów z wyprzedzeniem,
-- ręczny fallback, gdy automatyczna publikacja zawiedzie,
-- brak sytuacji, w której awaria schedulera pozostawia dany dzień bez quizu.
+### Ukończony zakres
+- publisher PostgreSQL: dokładnie 5 unikalnych, technicznie poprawnych, approved pytań,
+- deterministyczny wybór i idempotentny retry bez zmiany istniejącego zestawu,
+- ochrona opublikowanego challenge przed zmianą/usunięciem przez role aplikacyjne; emergency access postgres zachowany,
+- atomowe prepublishing dziś + 7 dni UTC, potwierdzone na development,
+- server-side fallback w `attempt/start` przy braku dzisiejszego challenge,
+- GET daily pozostaje read-only; kontrolowany komunikat UI przy niedostępności,
+- migracja, testy SQL, testy aplikacyjne i smoke test potwierdzone,
+- Supabase pg_cron 1.6.4 i aktywny job `footquiz-daily-challenges` co godzinę (`5 * * * *`) na development.
 
-### Do decyzji
-Najprostszy scheduler produkcyjny:
-- Vercel Cron,
-- Supabase scheduled job,
-- inny minimalny mechanizm.
-
-Nie budujemy rozbudowanego CMS tylko po to, aby rozwiązać ten etap.
+### Ostatni check
+**PASS:** pierwszy rzeczywisty scheduled Cron execution potwierdzony na development. Stage 6 ukończony.
+Realna współbieżność dwóch sesji i forced rollback attempts pozostają DEFERRED.
 
 ### Definition of Done
 Nowy dzień nie wymaga ręcznej interwencji właściciela, aby użytkownicy mogli rozpocząć Daily.
+Następny etap to Stage 7 — Analytics MVP.
+Szczegóły weryfikacji: `docs/testing.md`.
 
 ---
 
@@ -311,7 +307,7 @@ Do wykonania w odpowiednim momencie:
 - realny test dwóch współbieżnych sesji DB,
 - forced failure / rollback,
 - większa macierz Origin/cookie/network,
-- published challenge immutability,
+- pełna ochrona treści pozostaje niżej; immutability challenge dla ról aplikacyjnych wdrożono w Stage 6,
 - ochrona pytań użytych w opublikowanym challenge,
 - lepsza synchronizacja `supabase/schema.sql` z migracjami,
 - factual validation Stage 2, jeśli ręczna kontrola stanie się bottleneckiem,
@@ -325,7 +321,7 @@ Nie każdy punkt jest blockerem soft-launchu.
 
 FootQuiz jest gotowy do pierwszego kontrolowanego soft-launchu, gdy:
 
-- [ ] Daily tworzy się automatycznie każdego dnia,
+- [x] Daily tworzy się automatycznie każdego dnia — implementacja i Cron aktywne, scheduled execution PASS na development,
 - [ ] podstawowe analytics działają,
 - [ ] publiczny attack surface i `/admin` są zabezpieczone,
 - [ ] mamy zweryfikowaną pulę pytań na okres testu,

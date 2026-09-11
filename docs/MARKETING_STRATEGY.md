@@ -680,3 +680,24 @@ kolejny Daily następnego dnia
 Najpierw budujemy tę pętlę.
 
 Dopiero kiedy dane pokażą, że działa, dokładamy skalę.
+
+## 19. Strategia ekspansji językowej (PL → EN)
+
+Zaczynamy od walidacji w Polsce, ale od pierwszego dnia unikamy zamykania się w lokalnej niszy:
+
+- **Globalny branding od startu:**
+  - Domena międzynarodowa (`.com` lub `.app`).
+  - Uniwersalne nazwy profili społecznościowych (np. `@FootQuizApp`, `@PlayFootQuiz`) — bez dopisków typu `PL` czy `_pl`.
+  - Neutralne logo i bio od początku po angielsku.
+  - Brak podwójnych kont na start (jedno konto do zarządzania).
+
+- **Dystrybucja w fazie PL:**
+  - Ruch pozyskujemy głównie z **kont osobistych** (grupy FB, fora, bezpośrednie kontakty), co nie „brudzi” profilu marki.
+  - Oficjalny profil na X może włączać się w dyskusje po polsku, ale sam format share/kafelków i formalne komunikaty powinny być możliwie uniwersalne.
+
+- **Formaty wideo (TikTok / Shorts):**
+  - Brak polskiego lektora — formaty oparte na tekście na ekranie i muzyce (tekst od razu po angielsku lub uniwersalny, zrozumiały dla polskich kibiców), co zapobiega zablokowaniu konta w lokalnej bańce algorytmicznej.
+
+- **Przygotowanie techniczne (i18n):**
+  - Uniwersalna pętla share: kafelki (🟩🟩🟥🟩🟩) nie wymagają tłumaczeń.
+  - Linki z parametrem językowym (np. `?lang=pl` / `/pl/daily`), co ułatwi płynne przejście na EN w kolejnych iteracjach bez migracji profili czy domen.

@@ -5,7 +5,7 @@
 FootQuiz używa asynchronicznego „Wyzwania Dnia”:
 
 - jeden challenge na dzień,
-- docelowo dokładnie 5 pytań,
+- dokładnie 5 pytań,
 - ten sam zestaw dla wszystkich graczy danego dnia,
 - dzień liczony w UTC,
 - bez trybu 1v1 na żywo,
@@ -26,7 +26,7 @@ Handler:
 1. korzysta z serwerowego klienta Supabase,
 2. wyznacza bieżącą datę w UTC,
 3. pobiera `daily_challenges.question_ids`,
-4. wymaga niepustej listy unikalnych ID,
+4. wymaga dokładnie 5 unikalnych ID i kompletu 5 znalezionych pytań,
 5. pobiera dokładnie wskazane pytania,
 6. odtwarza kolejność według `question_ids`,
 7. zwraca wyłącznie publiczne pola:
@@ -46,13 +46,13 @@ Odpowiedź ma `Cache-Control: no-store`.
 
 Brak challenge dla dzisiejszej daty zwraca 404. Niespójność danych lub niepełny zestaw powoduje błąd serwera zamiast zwrócenia częściowego quizu.
 
-### Aktualne ograniczenie
+### Automatyczna publikacja — Stage 6
 
-Dzienny challenge nie jest jeszcze tworzony automatycznie.
+RPC `ensure_daily_challenge` wybiera 5 approved, technicznie poprawnych pytań deterministycznie przez hash daty i ID. Istniejący zestaw i kolejność pozostają bez zmian przy retry. Brak 5 kwalifikujących się pytań powoduje błąd bez częściowej publikacji; nie ma twardej rotacji, więc pula 5 pytań wystarcza.
 
-Jeżeli rekord dla bieżącego dnia nie istnieje w `daily_challenges`, użytkownik nie może rozpocząć quizu.
+`ensure_daily_challenge_window` publikuje atomowo dziś + 7 kolejnych dni UTC. Supabase Cron na development jest aktywny (`footquiz-daily-challenges`, `5 * * * *`); pierwszy rzeczywisty scheduled run potwierdzono — **PASS**. Prepublishing i ręczne wywołania publishera zweryfikowano.
 
-Automatyczne tworzenie/publikowanie dziennego zestawu jest opisane jako najbliższy etap w `ROADMAP.md`.
+GET pozostaje read-only. Fallback działa wyłącznie w start/resume. Nowe zapisy challenge obejmuje CHECK pięciu unikalnych ID bez NULL; constraint jest `NOT VALID`, więc nie potwierdza zgodności wszystkich historycznych rekordów.
 
 ---
 
@@ -92,6 +92,10 @@ Endpoint:
 - tworzy lub wznawia próbę dla anonimowej identity i dzisiejszego challenge,
 - korzysta z serwerowego Supabase,
 - zwraca autorytatywny stan próby.
+
+Start najpierw odczytuje dzisiejszy challenge. Jeśli istnieje, nie wywołuje publishera. Jeśli go brak, `ensureDailyChallenge(today)` wywołuje RPC, po czym start ponownie odczytuje i waliduje challenge. Błąd pierwszego SELECT nie uruchamia fallbacku. Kontrola dnia UTC po publikacji i ponownym odczycie zapobiega kontynuowaniu próby dla niewłaściwego dnia.
+
+Data pochodzi wyłącznie z serwera. Brak wystarczającej puli daje `DAILY_CHALLENGE_UNAVAILABLE` i komunikat o chwilowej niedostępności; błędy DB nie ujawniają surowych szczegółów.
 
 Stan może być:
 
@@ -320,13 +324,12 @@ Stan gry pochodzi z serwera.
 
 ## 12. Znane ograniczenia
 
-- brak automatycznego generowania/publikowania `daily_challenges`,
-- API nie wymusza jeszcze docelowej liczby dokładnie 5 pytań we wszystkich warstwach,
+- historyczny CHECK pozostaje NOT VALID; istniejące rekordy nie zostały globalnie zwalidowane,
 - timer jest klientowy,
 - `time_taken` nie jest zapisywany,
 - dzień liczony jest w UTC,
 - reset cookie/incognito tworzy nową anonimową identity,
-- opublikowany challenge i użyte pytania nie są jeszcze objęte pełną polityką immutability,
+- challenge jest chroniony dla ról aplikacyjnych, lecz postgres zachowuje emergency access; pełna immutability treści pytań pozostaje odłożona,
 - rzeczywista współbieżność dwóch niezależnych sesji DB pozostaje testem odłożonym,
 - forced failure pomiędzy INSERT wyniku a `completed_at` nie został jeszcze przetestowany w realnym Postgresie.
 
@@ -340,12 +343,11 @@ Najbliższe prace są śledzone w:
 
 W szczególności:
 
-1. automatyczne Daily Challenge,
-2. Analytics MVP,
-3. decyzja o rankingu i czasie,
-4. security hardening,
-5. content readiness,
-6. share/virality,
-7. soft-launch.
+1. Analytics MVP,
+2. decyzja o rankingu i czasie,
+3. security hardening,
+4. content readiness,
+5. share/virality,
+6. soft-launch.
 
 Auth i pełny streak nie są wymagane do pierwszego kontrolowanego testu użytkowników.

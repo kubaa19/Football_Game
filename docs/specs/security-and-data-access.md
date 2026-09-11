@@ -87,6 +87,18 @@ Nie zwraca:
 
 Samo pominięcie kolumn w odpowiedzi API nie zastępuje RLS/grantów. Publiczny dostęp do tabel musi być kontrolowany osobno.
 
+### Publikacja Daily Challenge — Stage 6
+
+Nowy publisher wymaga `questions.is_approved=true` i kontroli technicznej w DB. Domyślne approval to `false`; istniejące pytania nie są automatycznie zatwierdzane. Operator zatwierdza je ręcznie. Trigger blokuje approval przez role publiczne, ale nie zastępuje ochrony admina ani kontroli merytorycznej.
+
+Publisher działa jako `SECURITY INVOKER`, jest przeznaczony dla postgres/service_role, bez EXECUTE dla PUBLIC/anon/authenticated. `service_role` ma SELECT + INSERT na `daily_challenges`, bez UPDATE/DELETE/TRUNCATE. Trigger chroni tożsamość, datę i kolejność opublikowanego challenge w normalnym flow. Publisher nigdy nie aktualizuje istniejącego zestawu.
+
+Postgres zachowuje świadomy emergency UPDATE/DELETE/TRUNCATE, nadal podlegający zwykłym CHECK/FK. Pełna immutability treści pytań nie została wdrożona; approval nie gwarantuje, że treść nie zostanie później zmieniona.
+
+Fallback w `attempt/start` używa daty wyliczonej na serwerze i `createSupabaseAdmin()`; waliduje metadata RPC, nie ujawnia feedbacku ani raw błędów DB. GET daily nie publikuje. Cron jest aktywny na development jako postgres; pierwszy scheduled execution potwierdzono — PASS.
+
+Testy realnego public schema sprawdziły wybrane granty i ochrony Stage 6. Testy izolowanych kopii nie dowodzą konfiguracji public ani realnej współbieżności. Nie wykonano w tym kroku pełnego audytu zdalnych RLS/grantów.
+
 ---
 
 ## 5. Serwerowy zapis odpowiedzi
@@ -310,7 +322,7 @@ Akceptowane lub odłożone:
 - brak Auth oznacza brak trwałego właściciela historii,
 - brak rate limiting,
 - timer klientowy,
-- brak pełnej immutability opublikowanego challenge,
+- postgres zachowuje emergency access do challenge; ochrona ról aplikacyjnych jest wdrożona,
 - pytania użyte w challenge nie mają jeszcze pełnej ochrony przed późniejszą mutacją,
 - nie wykonano realnego testu dwóch współbieżnych sesji DB,
 - nie wykonano forced failure/rollback między INSERT wyniku i `completed_at`,

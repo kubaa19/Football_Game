@@ -45,9 +45,13 @@ export default function QuizContainer() {
       setQuestions(restored.questions);
       setAttempt(restored.attempt);
       setDisplayedId(restored.attempt.nextQuestionId);
-    } catch {
+    } catch (error) {
       if (current === generation.current) {
-        setError('Nie udało się odtworzyć dzisiejszego quizu. Wczytaj zestaw ponownie.');
+        if (error instanceof QuizApiError && error.code === 'DAILY_CHALLENGE_UNAVAILABLE') {
+          setError('Dzisiejszy quiz jest chwilowo niedostępny. Spróbuj ponownie za chwilę.');
+        } else {
+          setError('Nie udało się odtworzyć dzisiejszego quizu. Wczytaj zestaw ponownie.');
+        }
       }
     } finally {
       if (current === generation.current) setLoading(false);

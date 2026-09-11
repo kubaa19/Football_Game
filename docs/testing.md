@@ -533,7 +533,7 @@ This finding directly motivated **Stage 6 — Automatic Daily Challenge**.
 
 ---
 
-## 10. Current verified checkpoint
+## 10. Historical verified checkpoint — end of Stage 5.1
 
 At the end of Stage 5.1, the following are verified in the development environment:
 
@@ -561,8 +561,84 @@ Not yet verified / deliberately deferred:
 - production deployment behavior,
 - automatic daily challenge generation.
 
-The next implementation stage is:
+At that checkpoint, the next implementation stage was:
 
 **Stage 6 — Automatic Daily Challenge**
 
 Current roadmap: `ROADMAP.md`.
+
+
+## Stage 6 - Automatic Daily Challenge verification
+
+Implementation, application fallback, prepublishing and Cron activation are complete on DEVELOPMENT. Stage 6 is **DONE**: the first real scheduled Cron execution is **PASS**, confirmed by the operator. The manual results below were confirmed by the operator; this documentation cleanup did not execute SQL or repeat those tests.
+
+### Verification status
+
+| Check | Status | Evidence / scope |
+| --- | --- | --- |
+| Migration applied | PASS | `20260911180000_automatic_daily_challenges.sql` applied successfully on development Supabase |
+| SQL publisher tests | PASS | Entire `supabase/tests/daily_challenges.sql` |
+| Quiz attempts regression | PASS | Entire `supabase/tests/quiz_attempts.sql`, isolated model |
+| Approval of 5 seed questions | PASS | Five seed questions have `is_approved=true` |
+| Real single-day publisher | PASS | `ensure_daily_challenge(2026-09-12)`: first call `created=true` |
+| Idempotency | PASS | Retry: `created=false`, same challengeId and questionIds |
+| 8-day publication window | PASS | `ensure_daily_challenge_window(2026-09-11, 8)`: September 11–12 preserved, September 13–18 created |
+| Application fallback / regression | PASS | 21 mocked tests in `tests/daily-challenges.cjs` |
+| Leaderboard regression | PASS | 16 checks in `tests/leaderboard.cjs` |
+| Full TypeScript typecheck | PASS | `tsc --noEmit --incremental false --pretty false` |
+| Build | PASS | `npm.cmd run build` |
+| Diff whitespace check | PASS | `git diff --check` |
+| Manual safe daily payload | PASS | Exactly 5 questions, no `correct_index` or `explanation` |
+| Normal application flow | PASS | Manual smoke test |
+| Cron extension / configuration / activation | PASS | pg_cron 1.6.4; active job described below |
+| First real scheduled Cron execution | PASS | Confirmed by the operator on development |
+| Real two-session concurrency | DEFERRED | No independent-connection concurrency run performed |
+| Forced failure between result INSERT and completed_at UPDATE | DEFERRED | Not covered by publisher batch rollback or mocks |
+
+### Real public-schema tests
+
+Section A of `supabase/tests/daily_challenges.sql` uses its own UUIDs and reserved non-current dates inside BEGIN/ROLLBACK. It does not move or delete a real challenge. It checks actual migration metadata, constraints, default approval, public RPC/approval restrictions, service_role UPDATE/DELETE restrictions, existing-challenge replay, operator UPDATE/DELETE on fixture rows, and expired attempts using real RPCs.
+
+It does not TRUNCATE public or temporarily broaden public grants/policies. These targeted checks are not a comprehensive audit of historical records or all remote RLS/grants.
+
+### Isolated model tests
+
+Section B of `daily_challenges.sql` and all of `supabase/tests/quiz_attempts.sql` create `fq6_test` within their own BEGIN/ROLLBACK. They copy table/function definitions from catalogs, not application rows. LIKE does not copy FKs, triggers, RLS or ACLs; the model reconstructs them. Schema name collisions abort without dropping existing schemas.
+
+Copied functions replace public references with fq6_test and use a separate advisory-lock namespace. Copied attempts RPCs use DATE '2040-01-01'. Bootstrap sets search_path to pg_catalog before rendering definitions and asserts the exact isolated composite-type signature. Review these transformations when RPC source changes.
+
+These tests validate **isolated copies**, not the exact real public configuration. They are **not evidence of real-schema RLS/grants or two-session concurrency**. Publisher cases cover 0–4, exactly 5 and more than 5 candidates, deterministic selection/retry, draft/malformed exclusion, eight-day batches and atomic batch rollback. Attempts use five challenge questions plus one foreign question; expected score/pattern is 2/5 and 10010. Attempt creation is an INSERT fixture, not a Next.js start request. Emergency postgres TRUNCATE and trigger defenses under broadened grants are tested only in isolation.
+
+### Application verification
+
+The 21 mocked tests cover existing challenge without publication, missing challenge with one ensure call and reread, insufficient candidates, DB/transport failures, first SELECT failure without publication, missing second read, UTC midnight protection, safe metadata, read-only GET with exactly five questions, and start → answer → finish → resume regression.
+
+Mocks do not prove real database concurrency. Manual safe GET and normal-flow smoke tests passed; the missing-day fallback is covered automatically, without claiming a separate manual missing-day test.
+
+### Active development Cron
+
+- Extension: `pg_cron` 1.6.4.
+- Job: `footquiz-daily-challenges`.
+- Schedule: `5 * * * *`.
+- Database: `postgres`.
+- Username: `postgres`.
+- Active: `true`.
+- Operator setup file: `supabase/schedules/daily_challenges.sql`.
+
+Command:
+
+```sql
+SELECT public.ensure_daily_challenge_window((clock_timestamp() AT TIME ZONE 'UTC')::date, 8);
+```
+
+**PASS:** the operator confirmed the first real scheduled Cron execution on development. A failed batch rolls back all new days from that invocation and requires inspection.
+
+### Deferred and operational notes
+
+Real two-connection procedures remain in `supabase/tests/daily_challenges-concurrency.md` and `supabase/tests/quiz_attempts-concurrency.md`. Concurrency and deliberate failure between result insertion and completion update remain DEFERRED.
+
+SQL test transactions end with ROLLBACK. If SQL Editor stops after an error, rollback on the same connection or close that DB connection; browser refresh and automatic SQL Editor cleanup are not assumed guarantees.
+
+Postgres emergency access still obeys CHECK/FK constraints. Application service_role cannot UPDATE/DELETE/TRUNCATE daily_challenges. Question content remains mutable; operators should avoid editing published/approved content. Five approved questions support the MVP without hard rotation, but do not establish content variety or factual quality.
+
+Stage 6 is complete; the next roadmap stage is **Stage 7 — Analytics MVP**.

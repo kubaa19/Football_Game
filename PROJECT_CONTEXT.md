@@ -95,7 +95,7 @@ Serwer:
 - nie zwraca `explanation` przed odpowiedzią,
 - nie zwraca częściowego zestawu przy niespójności danych.
 
-Obecnie dzienny challenge musi istnieć w bazie. Automatyczne tworzenie/publikowanie challenge jest najbliższym etapem roadmapy.
+Stage 6: publisher PostgreSQL tworzy stabilny zestaw 5 pytań z puli `is_approved=true`. Przygotowuje dziś + 7 kolejnych dni UTC. Jeśli dzisiejszego challenge brakuje, `attempt/start` uruchamia serwerowy fallback; GET pozostaje read-only. Supabase Cron jest skonfigurowany i aktywny na development (`5 * * * *`); pierwszy rzeczywisty scheduled execution został potwierdzony — **PASS**.
 
 ### Anonymous identity
 
@@ -190,7 +190,7 @@ Generator: `src/scripts/question-generator.txt`
 Walidator: `src/scripts/prompts/validate-questions.js`  
 Specyfikacja: `docs/specs/question-validation.md`
 
-Walidacja techniczna nie potwierdza poprawności faktograficznej.
+Walidacja techniczna nie potwierdza poprawności faktograficznej. Nowe publikacje wymagają ręcznego approval operatora (`questions.is_approved`, domyślnie `false`); sam import nie dopuszcza pytania do publikacji.
 
 Na MVP każde pytanie wymaga ręcznej kontroli:
 - faktu,
@@ -251,7 +251,6 @@ Szczegóły: `docs/specs/security-and-data-access.md`
 
 ## 11. Znane ograniczenia
 
-- daily challenge nie jest jeszcze tworzony automatycznie,
 - timer 15 s działa po stronie klienta,
 - timer może zresetować się po refreshu nierozwiązanego pytania,
 - `time_taken` nie jest obecnie zapisywany,

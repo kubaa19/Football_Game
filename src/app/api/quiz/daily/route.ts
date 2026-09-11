@@ -23,7 +23,7 @@ export async function GET() {
       return NextResponse.json({ error: 'Brak wyzwania na dzisiaj.' }, { status: 404, headers });
     }
     const ids: unknown = challenge.question_ids;
-    if (!Array.isArray(ids) || ids.length === 0 ||
+    if (!Array.isArray(ids) || ids.length !== 5 ||
         !ids.every((id): id is string => typeof id === 'string') ||
         new Set(ids).size !== ids.length) {
       throw new Error('Invalid challenge');

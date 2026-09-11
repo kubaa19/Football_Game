@@ -1,5 +1,6 @@
 import 'server-only';
 import { createSupabaseAdmin } from './supabaseAdmin';
+import { ensureDailyChallenge, EnsureDailyChallengeError } from './ensureDailyChallenge';
 import type {
   PersistedQuizAnswer,
   QuizAttemptResult,
@@ -8,6 +9,7 @@ import type {
 
 const errorStatuses = {
   DAILY_CHALLENGE_NOT_FOUND: 404,
+  DAILY_CHALLENGE_UNAVAILABLE: 503,
   DAILY_CHALLENGE_CHANGED: 409,
   DAILY_CHALLENGE_INVALID: 500,
   ATTEMPT_DATA_INVALID: 500,
@@ -129,16 +131,23 @@ export async function startQuizAttempt(ownerHash: string): Promise<QuizAttemptSt
   try {
     if (!/^[0-9a-f]{64}$/.test(ownerHash)) fail('ATTEMPT_START_UNAVAILABLE');
     const db = createSupabaseAdmin();
-    const { data: challenge, error: challengeError } = await db
-      .from('daily_challenges').select('id, date, question_ids')
-      .eq('date', today).maybeSingle();
+    const readChallenge = () => db.from('daily_challenges')
+      .select('id, date, question_ids').eq('date', today).maybeSingle();
+    let { data: challenge, error: challengeError } = await readChallenge();
     if (challengeError) fail('ATTEMPT_START_UNAVAILABLE');
     ensureSameDay();
-    if (!challenge) fail('DAILY_CHALLENGE_NOT_FOUND');
+    if (!challenge) {
+      await ensureDailyChallenge(today);
+      ensureSameDay();
+      ({ data: challenge, error: challengeError } = await readChallenge());
+      ensureSameDay();
+      if (challengeError) fail('ATTEMPT_START_UNAVAILABLE');
+      if (!challenge) fail('DAILY_CHALLENGE_UNAVAILABLE');
+    }
 
     const rawIds: unknown = challenge.question_ids;
     if (!isId(challenge.id) || challenge.date !== today ||
-        !Array.isArray(rawIds) || rawIds.length === 0 ||
+        !Array.isArray(rawIds) || rawIds.length !== 5 ||
         !rawIds.every(isId) || new Set(rawIds).size !== rawIds.length) {
       fail('DAILY_CHALLENGE_INVALID');
     }
@@ -228,6 +237,7 @@ export async function startQuizAttempt(ownerHash: string): Promise<QuizAttemptSt
   } catch (error) {
     ensureSameDay();
     if (error instanceof QuizAttemptStartError) throw error;
+    if (error instanceof EnsureDailyChallengeError) fail(error.code);
     // Never propagate/log raw database errors or credentials.
     fail('ATTEMPT_START_UNAVAILABLE');
   }
