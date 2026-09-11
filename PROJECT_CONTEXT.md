@@ -50,7 +50,7 @@ Priorytet mają elementy potrzebne do:
 
 Ligi, Typer Dnia, rozbudowane achievementy, sklep, serca i monetyzacja są odłożone do czasu uzyskania danych z realnego użycia.
 
-Aktualny plan: `docs/ROADMAP.md`.
+Aktualny plan: `ROADMAP.md`.
 
 ---
 
@@ -269,7 +269,7 @@ Szczegóły wykonanych testów: `docs/testing.md`.
 
 ## 12. Dokumentacja
 
-- `docs/ROADMAP.md` — aktualny postęp i kolejność wdrożeń.
+- `ROADMAP.md` — aktualny postęp i kolejność wdrożeń.
 - `docs/testing.md` — wykonane testy i ręczne weryfikacje.
 - `docs/MARKETING_STRATEGY.md` — pozyskanie pierwszych użytkowników i organiczny growth.
 - `docs/specs/daily-quiz.md` — Daily Quiz.
@@ -279,4 +279,4 @@ Szczegóły wykonanych testów: `docs/testing.md`.
 - `docs/specs/achievements-and-progression.md` — późniejsza grywalizacja.
 - `docs/specs/daily-match-predictor.md` — Typer Dnia / post-validation.
 
-`PROJECT_CONTEXT.md` ma pozostać krótkim opisem aktualnego produktu i najważniejszych decyzji. Historia wdrożeń należy do `docs/ROADMAP.md` i `docs/testing.md`.
+`PROJECT_CONTEXT.md` ma pozostać krótkim opisem aktualnego produktu i najważniejszych decyzji. Historia wdrożeń należy do `ROADMAP.md` i `docs/testing.md`.

@@ -52,7 +52,7 @@ Dzienny challenge nie jest jeszcze tworzony automatycznie.
 
 Jeżeli rekord dla bieżącego dnia nie istnieje w `daily_challenges`, użytkownik nie może rozpocząć quizu.
 
-Automatyczne tworzenie/publikowanie dziennego zestawu jest opisane jako najbliższy etap w `docs/ROADMAP.md`.
+Automatyczne tworzenie/publikowanie dziennego zestawu jest opisane jako najbliższy etap w `ROADMAP.md`.
 
 ---
 
@@ -336,7 +336,7 @@ Stan gry pochodzi z serwera.
 
 Najbliższe prace są śledzone w:
 
-`docs/ROADMAP.md`
+`ROADMAP.md`
 
 W szczególności:
 

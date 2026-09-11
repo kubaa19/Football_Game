@@ -78,7 +78,10 @@ FootQuiz ma działać następnego dnia bez ręcznego INSERT w Supabase.
 - brak zmiany zestawu już opublikowanego dnia,
 - idempotentny retry,
 - kontrolowany fallback ręczny,
-- czytelny komunikat UI, gdy quiz nie jest dostępny.
+- czytelny komunikat UI, gdy quiz nie jest dostępny,
+- możliwość przygotowania challenge'ów z wyprzedzeniem,
+- ręczny fallback, gdy automatyczna publikacja zawiedzie,
+- brak sytuacji, w której awaria schedulera pozostawia dany dzień bez quizu.
 
 ### Do decyzji
 Najprostszy scheduler produkcyjny:
@@ -261,6 +264,8 @@ Wymagania:
 - migracja anonymous → account,
 - zachowanie wyniku i streaka,
 - Google jako główna prosta opcja.
+
+Anonymous → authenticated continuity: utworzenie konta nie może rozpoczynać historii gracza od zera. Przy logowaniu należy bezpiecznie powiązać dotychczasową anonimową tożsamość, wyniki i streak z auth.users.id. Mechanizm migracji zostanie zaprojektowany przy wdrażaniu Auth i nie blokuje pierwszego soft-launchu bez kont.
 
 ---
 

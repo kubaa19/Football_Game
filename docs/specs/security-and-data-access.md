@@ -322,7 +322,7 @@ Nie każdy z tych punktów blokuje pierwszy kontrolowany test, ale publiczny att
 
 ## 16. Priorytety przed soft-launchem
 
-Zgodnie z `docs/ROADMAP.md` najważniejsze security tasks to:
+Zgodnie z `ROADMAP.md` najważniejsze security tasks to:
 
 1. pełny audyt RLS/grantów,
 2. ochrona `/admin`,
@@ -337,7 +337,7 @@ Nie wdrażamy Auth tylko po to, aby ukryć problemy z modelem uprawnień.
 ## 17. Powiązane dokumenty
 
 - `PROJECT_CONTEXT.md`
-- `docs/ROADMAP.md`
+- `ROADMAP.md`
 - `docs/testing.md`
 - `docs/specs/daily-quiz.md`
 - `docs/specs/question-validation.md`
