@@ -72,53 +72,109 @@ Ranking:
 FootQuiz ma działać następnego dnia bez ręcznego INSERT w Supabase.
 
 ### Ukończony zakres
-- publisher PostgreSQL: dokładnie 5 unikalnych, technicznie poprawnych, approved pytań,
-- deterministyczny wybór i idempotentny retry bez zmiany istniejącego zestawu,
-- ochrona opublikowanego challenge przed zmianą/usunięciem przez role aplikacyjne; emergency access postgres zachowany,
-- atomowe prepublishing dziś + 7 dni UTC, potwierdzone na development,
-- server-side fallback w `attempt/start` przy braku dzisiejszego challenge,
-- GET daily pozostaje read-only; kontrolowany komunikat UI przy niedostępności,
-- migracja, testy SQL, testy aplikacyjne i smoke test potwierdzone,
-- Supabase pg_cron 1.6.4 i aktywny job `footquiz-daily-challenges` co godzinę (`5 * * * *`) na development.
+- `questions.is_approved BOOLEAN NOT NULL DEFAULT false`,
+- tylko approved i technicznie poprawne pytania kwalifikują się do nowych publikacji,
+- dokładnie 5 unikalnych pytań w challenge,
+- deterministyczny wybór kolejności,
+- idempotentny `ensure_daily_challenge(date)`,
+- atomowe `ensure_daily_challenge_window(start_date, 8)`,
+- prepublishing: dziś + 7 kolejnych dni UTC,
+- istniejący poprawny challenge pozostaje bez zmian,
+- brak częściowej publikacji przy zbyt małej puli,
+- kontrolowany ręczny fallback operatora przez ten sam publisher,
+- server-side fallback w `POST /api/quiz/attempt/start` tylko wtedy, gdy dzisiejszego challenge brakuje,
+- po fallbacku ponowny SELECT i kontrola zmiany dnia UTC,
+- `GET /api/quiz/daily` pozostaje read-only i wymaga dokładnie 5 pytań,
+- bezpieczne mapowanie błędów bez ujawniania surowych błędów PostgreSQL,
+- ochrona opublikowanego `daily_challenges` przed UPDATE/DELETE przez normalny flow aplikacji,
+- emergency maintenance dla `postgres`,
+- Supabase `pg_cron` 1.6.4,
+- aktywny job `footquiz-daily-challenges`,
+- harmonogram `5 * * * *`,
+- pierwszy realny scheduled Cron execution: **PASS**.
 
-### Ostatni check
-**PASS:** pierwszy rzeczywisty scheduled Cron execution potwierdzony na development. Stage 6 ukończony.
-Realna współbieżność dwóch sesji i forced rollback attempts pozostają DEFERRED.
+### Potwierdzone testy
+- migracja Stage 6 na development: PASS,
+- `supabase/tests/daily_challenges.sql`: PASS,
+- `supabase/tests/quiz_attempts.sql`: PASS,
+- pięć seed questions zatwierdzonych: PASS,
+- real publisher dla 2026-09-12: `created=true`: PASS,
+- identyczny retry: `created=false`, ten sam challenge: PASS,
+- realne okno 8 dni: PASS,
+- fallback/regression mock tests: PASS,
+- leaderboard regression: PASS,
+- TypeScript typecheck: PASS,
+- build: PASS,
+- `git diff --check`: PASS,
+- manualny Daily payload: dokładnie 5 pytań, bez `correct_index` i `explanation`: PASS,
+- scheduled Cron execution: PASS.
+
+### Świadomie odłożone
+- rzeczywisty test dwóch równoległych sesji DB — DEFERRED,
+- forced failure / rollback test — DEFERRED,
+- pełne versioning/freeze treści opublikowanych pytań — DEFERRED.
 
 ### Definition of Done
-Nowy dzień nie wymaga ręcznej interwencji właściciela, aby użytkownicy mogli rozpocząć Daily.
-Następny etap to Stage 7 — Analytics MVP.
-Szczegóły weryfikacji: `docs/testing.md`.
+Nowy dzień nie wymaga ręcznej interwencji właściciela, aby użytkownicy mogli rozpocząć Daily, a awaria schedulera nie powinna sama w sobie pozostawić dnia bez quizu dzięki 7-dniowemu prepublishingowi, fallbackowi startu i ręcznemu fallbackowi operatora.
+
+Szczegóły: `docs/testing.md`.
 
 ---
 
 ## Stage 7 — Analytics MVP
-**Status: PLANNED — HIGH PRIORITY**
+**Status: NEXT — HIGH PRIORITY**
 
 ### Dlaczego teraz
 North Star to D1/D7. Start bez analytics oznacza utratę danych z pierwszych użytkowników.
 
-### Minimalny zakres
+### Podjęta decyzja
+- provider: **Umami Cloud EU**,
+- cienka warstwa `track(...)`,
+- oddzielna `analytics_id`, niezależna od gameplay cookie/hash,
+- privacy-first i minimalizacja danych,
+- bez session replay, heatmap i A/B testów na MVP.
+
+### Minimalny event taxonomy
+- `quiz_viewed`,
 - `quiz_started`,
-- `question_answered` lub równoważny pomiar miejsca porzucenia,
+- `question_answered`,
 - `quiz_completed`,
 - `result_saved`,
-- `result_shared`,
-- source / UTM.
+- `leaderboard_viewed`.
 
-KPI:
-- completion rate,
-- D1,
-- D7,
-- share rate,
-- share → visit,
-- share → completed quiz,
-- retencja wg źródła.
+`share_clicked` / `result_shared` pozostają w Stage 11 razem z właściwym share flow.
 
-`docs/specs/analytics-specification.md` jest punktem wyjścia, nie obowiązkowym zakresem 1:1.
+### Retention
+- Day 0 cohort: pierwsze `quiz_completed`,
+- Core D1: `quiz_completed` następnego dnia,
+- Core D7: `quiz_completed` siódmego dnia,
+- pomocniczo Return D1/D7 przez `quiz_started`.
+
+### Minimalny zakres
+- integracja Umami Cloud EU,
+- anonymous analytics identity,
+- bezpieczna abstrakcja `track(...)`,
+- eventy kluczowego lejka,
+- funnel,
+- D1/D7,
+- podstawowe UTM attribution,
+- ochrona przed oczywistymi duplikatami Strict Mode / retry / refresh,
+- manualny dashboard smoke test.
+
+### Privacy
+Do analytics nie wysyłamy:
+- gameplay cookie,
+- `anonymous_token_hash`,
+- username jako identity,
+- sekretów Supabase,
+- treści pytań, odpowiedzi i explanation.
+
+Finalny sposób persistence `analytics_id` trzeba sprawdzić także pod kątem obowiązków privacy/consent przed publicznym ruchem.
 
 ### Definition of Done
-Po starcie potrafimy policzyć podstawowy funnel i retencję.
+Po starcie potrafimy policzyć podstawowy funnel, Core D1/D7 i podstawowe źródła ruchu, a payloady analytics nie zawierają danych wrażliwych.
+
+Spec: `docs/specs/analytics-specification.md`.
 
 ---
 
@@ -206,7 +262,7 @@ Gracz może jednym działaniem wysłać wynik znajomemu, a aplikacja potrafi zmi
 
 ---
 
-## Stage 12 — Production polish + soft-launch
+## Stage 12 — Production polish + soft launch
 **Status: PLANNED**
 
 ### Zakres
@@ -261,7 +317,7 @@ Wymagania:
 - zachowanie wyniku i streaka,
 - Google jako główna prosta opcja.
 
-Anonymous → authenticated continuity: utworzenie konta nie może rozpoczynać historii gracza od zera. Przy logowaniu należy bezpiecznie powiązać dotychczasową anonimową tożsamość, wyniki i streak z auth.users.id. Mechanizm migracji zostanie zaprojektowany przy wdrażaniu Auth i nie blokuje pierwszego soft-launchu bez kont.
+Anonymous → authenticated continuity: utworzenie konta nie może rozpoczynać historii gracza od zera. Przy logowaniu należy bezpiecznie powiązać dotychczasową anonimową tożsamość, wyniki i streak z `auth.users.id`. Mechanizm migracji zostanie zaprojektowany przy wdrażaniu Auth i nie blokuje pierwszego soft-launchu bez kont.
 
 ---
 
@@ -321,7 +377,7 @@ Nie każdy punkt jest blockerem soft-launchu.
 
 FootQuiz jest gotowy do pierwszego kontrolowanego soft-launchu, gdy:
 
-- [x] Daily tworzy się automatycznie każdego dnia — implementacja i Cron aktywne, scheduled execution PASS na development,
+- [x] Daily tworzy się automatycznie każdego dnia — publisher, fallback i Cron potwierdzone na development,
 - [ ] podstawowe analytics działają,
 - [ ] publiczny attack surface i `/admin` są zabezpieczone,
 - [ ] mamy zweryfikowaną pulę pytań na okres testu,

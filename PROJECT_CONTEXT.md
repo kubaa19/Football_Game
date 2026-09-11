@@ -41,33 +41,13 @@ Auth ma utrwalać wartość już uzyskaną przez gracza, a nie blokować wejści
 
 Nie budujemy całego docelowego MVP przed pokazaniem produktu użytkownikom.
 
-Priorytet mają elementy potrzebne do:
-1. niezawodnego codziennego działania gry,
-2. bezpiecznego publicznego uruchomienia,
-3. pomiaru zachowania graczy,
-4. zdobycia pierwszych realnych użytkowników,
-5. weryfikacji retencji i wiralowości.
-
-Ligi, Typer Dnia, rozbudowane achievementy, sklep, serca i monetyzacja są odłożone do czasu uzyskania danych z realnego użycia.
+Priorytet mają elementy potrzebne do niezawodnego działania Daily, bezpiecznego uruchomienia, pomiaru zachowania graczy i weryfikacji retencji.
 
 Aktualny plan: `ROADMAP.md`.
 
 ---
 
-## 3. Zakres i ograniczenia prawne MVP
-
-Treści quizowe dotyczą faktów piłkarskich: historii, statystyk, rozgrywek, zasad i transferów.
-
-Na start:
-- nie używamy oficjalnych herbów klubowych,
-- nie używamy płatnych zdjęć agencyjnych,
-- unikamy materiałów wizualnych wymagających licencji.
-
-To ogranicza ryzyka związane z prawami do treści i materiałów wizualnych, ale nie oznacza całkowitego wyeliminowania ryzyka prawnego.
-
----
-
-## 4. Stack
+## 3. Stack
 
 - Next.js 16 / App Router
 - React 19
@@ -81,31 +61,48 @@ Publiczne zmienne Supabase są oddzielone od serwerowego `SUPABASE_SECRET_KEY`.
 
 ---
 
-## 5. Aktualny core Daily Quiz
+## 4. Daily Quiz — aktualny stan
 
-### Pobieranie pytań
-
-`GET /api/quiz/daily`
-
-Serwer:
+`GET /api/quiz/daily`:
 - ustala dzień w UTC,
-- pobiera `daily_challenges.question_ids`,
-- zachowuje kolejność challenge,
+- pobiera kolejność z `daily_challenges.question_ids`,
+- wymaga dokładnie 5 pytań,
 - nie zwraca `correct_index`,
 - nie zwraca `explanation` przed odpowiedzią,
-- nie zwraca częściowego zestawu przy niespójności danych.
+- pozostaje read-only.
 
-Stage 6: publisher PostgreSQL tworzy stabilny zestaw 5 pytań z puli `is_approved=true`. Przygotowuje dziś + 7 kolejnych dni UTC. Jeśli dzisiejszego challenge brakuje, `attempt/start` uruchamia serwerowy fallback; GET pozostaje read-only. Supabase Cron jest skonfigurowany i aktywny na development (`5 * * * *`); pierwszy rzeczywisty scheduled execution został potwierdzony — **PASS**.
+### Automatic Daily Challenge — Stage 6 DONE
 
-### Anonymous identity
+Publisher PostgreSQL:
+- publikuje dokładnie 5 unikalnych pytań,
+- używa tylko pytań `is_approved=true` spełniających minimalne warunki techniczne,
+- deterministycznie wybiera kolejność,
+- nie zmienia istniejącego poprawnego challenge,
+- obsługuje idempotentny retry,
+- potrafi przygotować atomowo okno dziś + 7 kolejnych dni UTC,
+- przy zbyt małej puli nie tworzy częściowego challenge.
 
-Gracz anonimowy posiada losowy sekret w HttpOnly cookie.
+`POST /api/quiz/attempt/start`:
+- najpierw próbuje odczytać dzisiejszy challenge,
+- publisher uruchamia tylko wtedy, gdy challenge nie istnieje,
+- po publikacji ponownie odczytuje challenge,
+- kontroluje zmianę dnia UTC,
+- nie przyjmuje daty publikacji od browsera.
 
-Po stronie bazy przechowywany jest SHA-256 hash tej wartości.
+Supabase Cron:
+- `pg_cron` 1.6.4,
+- job `footquiz-daily-challenges`,
+- harmonogram `5 * * * *`,
+- przygotowuje okno 8 dni,
+- pierwszy realny scheduled execution: **PASS**.
 
-Reset cookie lub incognito może utworzyć nową anonimową tożsamość. Jest to zaakceptowane ograniczenie przed wdrożeniem Auth.
+Istnieje również kontrolowany ręczny fallback operatora przez ten sam publisher.
 
-### Quiz attempts
+---
+
+## 5. Anonymous identity i attempts
+
+Gracz anonimowy posiada losowy sekret w HttpOnly cookie. Po stronie bazy przechowywany jest SHA-256 hash tej wartości.
 
 Quiz wykorzystuje:
 - `quiz_attempts`,
@@ -114,138 +111,110 @@ Quiz wykorzystuje:
 
 `POST /api/quiz/attempt/start` tworzy lub wznawia próbę i zwraca autorytatywny stan serwera.
 
-Frontend nie używa localStorage jako źródła prawdy o postępie.
-
-### Odpowiedzi
-
-`POST /api/quiz/answer`
-
-- przyjmuje `attemptId`, `questionId`, `selectedIndex`,
-- zapisuje pierwszy zaakceptowany wybór przez RPC `record_quiz_attempt_answer`,
+`POST /api/quiz/answer`:
+- zapisuje pierwszy zaakceptowany wybór,
 - odpowiedzi są immutable,
 - identyczny retry jest idempotentny,
 - poprawność jest liczona po stronie serwera,
-- dopiero po odpowiedzi serwer może zwrócić `correctIndex` i `explanation`.
+- feedback z `correctIndex` i `explanation` pojawia się dopiero po odpowiedzi.
 
-### Finalizacja
-
-`POST /api/quiz/attempt/finish`
-
-- przyjmuje tylko `attemptId` i `username`,
+`POST /api/quiz/attempt/finish`:
 - klient nie przesyła score ani wzoru odpowiedzi,
-- RPC `finish_quiz_attempt` wylicza wynik z zapisanych odpowiedzi,
-- wynik jest zapisywany atomowo,
-- retry zakończonej próby zwraca istniejący wynik.
+- wynik jest wyliczany z persisted answers,
+- finalizacja jest atomowa,
+- retry zwraca istniejący wynik.
 
-Legacy ścieżki `/api/quiz/result` i `/quiz/result` zostały usunięte.
+Legacy `/api/quiz/result` i `/quiz/result` zostały usunięte.
 
 ---
 
 ## 6. Ranking
 
-Frontend nie odczytuje już `quiz_results` bezpośrednio z publicznego klienta Supabase.
+`GET /api/quiz/leaderboard` działa po stronie serwera.
 
-`GET /api/quiz/leaderboard`:
-- działa po stronie serwera,
-- używa `createSupabaseAdmin()`,
-- ustala dzień w UTC,
-- obecnie zwraca TOP 10,
-- publicznie wystawia tylko `id`, `username`, `score`, `totalQuestions`,
-- rozróżnia pusty ranking od błędu.
+Obecnie:
+- TOP 10,
+- whitelist publicznych pól,
+- brak bezpośredniego browserowego SELECT na `quiz_results`.
 
-Docelowo ranking MVP ma przejść do TOP 50.
-
-Nie podjęto jeszcze finalnej decyzji, czy czas będzie tie-breakerem. Jeżeli `time_taken` ma wpływać na ranking, nie może być zaufaną wartością podawaną przez klienta.
+Docelowo Stage 8 obejmie TOP 50 i decyzję dotyczącą tie-breakera czasu.
 
 ---
 
-## 7. Auth i streak
+## 7. Content
 
-Supabase Auth nie jest jeszcze wdrożony.
-
-Na pierwszym soft-launchu konto nie musi być wymagane.
-
-Docelowo po zakończeniu quizu aplikacja może proponować:
-
-**„Zapisz swoją serię” → Google Auth**
-
-Wdrożenie Auth powinno zachować anonimowy postęp użytkownika po przejściu anonymous → account.
-
-Prawdziwy streak nie jest jeszcze wdrożony; obecne wartości na stronie głównej są placeholderami.
-
----
-
-## 8. Content i jakość pytań
-
-Aktualny pipeline:
+Pipeline:
 
 ```text
 generator
 → walidacja techniczna
 → ręczna kontrola merytoryczna
-→ import do Supabase
+→ import
+→ approval
+→ publikacja
 ```
 
-Generator: `src/scripts/question-generator.txt`  
-Walidator: `src/scripts/prompts/validate-questions.js`  
-Specyfikacja: `docs/specs/question-validation.md`
+`questions.is_approved` domyślnie wynosi `false`. Sam import nie kwalifikuje pytania do publikacji.
 
-Walidacja techniczna nie potwierdza poprawności faktograficznej. Nowe publikacje wymagają ręcznego approval operatora (`questions.is_approved`, domyślnie `false`); sam import nie dopuszcza pytania do publikacji.
-
-Na MVP każde pytanie wymaga ręcznej kontroli:
-- faktu,
-- wszystkich czterech opcji,
-- `correct_index`,
-- `explanation`,
-- jednoznaczności pytania.
-
-Automatyczny factual validation jest odłożony do czasu, gdy ręczna weryfikacja stanie się realnym wąskim gardłem.
-
-Przed soft-launchem ważniejsza jest mniejsza baza dobrze sprawdzonych pytań niż szybkie osiągnięcie arbitralnej liczby rekordów.
+Walidacja techniczna nie zastępuje ręcznej kontroli faktograficznej.
 
 ---
 
-## 9. Analytics
+## 8. Analytics — Stage 7 NEXT
 
-Analityka produktowa nie jest jeszcze wdrożona i jest jednym z najbliższych etapów przed soft-launchem.
+Podjęta decyzja:
+- **Umami Cloud EU**,
+- cienka abstrakcja `track(...)`,
+- oddzielna `analytics_id`, niezależna od gameplay cookie/hash,
+- minimalizacja danych,
+- bez session replay, heatmap i A/B testów na MVP.
 
-Minimalnie chcemy mierzyć:
+Minimalne eventy:
+- `quiz_viewed`,
 - `quiz_started`,
-- odpowiedzi / miejsce porzucenia,
+- `question_answered`,
 - `quiz_completed`,
-- zapis wyniku,
-- `result_shared`,
-- źródło ruchu / UTM,
-- Daily completion rate,
-- D1,
-- D7,
-- Share Rate,
-- share → visit → completed quiz.
+- `result_saved`,
+- `leaderboard_viewed`.
 
-Szczegóły: `docs/specs/analytics-specification.md`
+North Star:
+- Day 0: pierwsze `quiz_completed`,
+- Core D1: `quiz_completed` następnego dnia,
+- Core D7: `quiz_completed` siódmego dnia.
 
-Specyfikacja może wymagać uproszczenia przed implementacją zgodnie z zasadą minimalnego zakresu soft-launchu.
+Nie wysyłamy do analytics gameplay cookie/hash, username jako identity, sekretów Supabase ani treści pytań/odpowiedzi.
+
+Spec: `docs/specs/analytics-specification.md`.
 
 ---
 
-## 10. Security — aktualne granice
+## 9. Auth i streak
 
-Już wdrożone:
-- odpowiedzi nie są oceniane przez frontend,
-- `correct_index` nie jest dostarczany przed odpowiedzią,
-- immutable persisted answers,
-- server-authoritative attempt,
-- idempotencja answer i finish,
-- finalizacja wyniku po stronie PostgreSQL,
-- leaderboard read po stronie serwera.
+Auth nie jest jeszcze wdrożony i nie blokuje pierwszego soft-launchu.
 
-Przed publicznym soft-launchem nadal wymagane są:
+Docelowy flow:
+
+```text
+wejście
+→ Daily bez konta
+→ wynik
+→ „Zapisz swoją serię”
+→ Google Auth
+```
+
+Przy wdrożeniu Auth należy zachować ciągłość anonymous → authenticated, tak aby konto nie rozpoczynało historii użytkownika od zera.
+
+---
+
+## 10. Security — pozostałe priorytety
+
+Przed szerokim publicznym ruchem nadal wymagane są:
 - audyt RLS i grantów,
-- sprawdzenie bezpośredniego dostępu do `quiz_results`,
+- kontrola bezpośredniego dostępu do starych tabel,
 - ochrona `/admin`,
-- kontrola dostępu do zapisu pytań.
+- kontrola uprawnień zapisu/edycji pytań.
 
-Szczegóły: `docs/specs/security-and-data-access.md`
+Stage 6 stabilizuje publikację challenge, ale pełne versioning/freeze treści pytań użytych w opublikowanym challenge pozostaje odłożone.
 
 ---
 
@@ -253,16 +222,14 @@ Szczegóły: `docs/specs/security-and-data-access.md`
 
 - timer 15 s działa po stronie klienta,
 - timer może zresetować się po refreshu nierozwiązanego pytania,
-- `time_taken` nie jest obecnie zapisywany,
+- `time_taken` nie jest obecnie wiarygodnym server-authoritative tie-breakerem,
 - dzień quizowy jest liczony w UTC,
-- Auth nie istnieje,
-- streak nie istnieje,
-- admin nie ma jeszcze docelowej ochrony,
+- Auth i prawdziwy streak nie istnieją,
+- `/admin` nie ma jeszcze docelowej ochrony,
 - brak kompletnego audytu RLS/grantów,
 - brak pełnej automatycznej factual validation,
-- rzeczywista konkurencja dwóch sesji DB i forced rollback pozostają testami odłożonymi.
-
-Szczegóły wykonanych testów: `docs/testing.md`.
+- realny test concurrency dwóch sesji DB i forced rollback pozostają DEFERRED,
+- analytics ma gotową decyzję/specyfikację, ale nie jest jeszcze zaimplementowane.
 
 ---
 
@@ -270,12 +237,12 @@ Szczegóły wykonanych testów: `docs/testing.md`.
 
 - `ROADMAP.md` — aktualny postęp i kolejność wdrożeń.
 - `docs/testing.md` — wykonane testy i ręczne weryfikacje.
-- `docs/MARKETING_STRATEGY.md` — pozyskanie pierwszych użytkowników i organiczny growth.
+- `docs/MARKETING_STRATEGY.md` — organiczny growth.
 - `docs/specs/daily-quiz.md` — Daily Quiz.
 - `docs/specs/security-and-data-access.md` — bezpieczeństwo.
 - `docs/specs/question-validation.md` — jakość pytań.
-- `docs/specs/analytics-specification.md` — analityka i atrybucja.
+- `docs/specs/analytics-specification.md` — Analytics MVP.
 - `docs/specs/achievements-and-progression.md` — późniejsza grywalizacja.
 - `docs/specs/daily-match-predictor.md` — Typer Dnia / post-validation.
 
-`PROJECT_CONTEXT.md` ma pozostać krótkim opisem aktualnego produktu i najważniejszych decyzji. Historia wdrożeń należy do `ROADMAP.md` i `docs/testing.md`.
+`PROJECT_CONTEXT.md` opisuje aktualny produkt i obowiązujące decyzje. Historia wdrożeń należy do `ROADMAP.md` i `docs/testing.md`.

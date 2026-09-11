@@ -1,132 +1,317 @@
-# Specyfikacja Techniczna: Moduł Analityki i Atrybucji Ruchu (FootQuiz)
+# Specyfikacja Techniczna: Analytics MVP (FootQuiz)
 
-## 1. Założenia biznesowe i prywatność (Privacy-First)
-- **Cel:** Precyzyjne mierzenie źródeł pozyskiwania graczy (X, WhatsApp, fora), weryfikacja retencji D1/D7 oraz monitorowanie ukończenia pętli gry (Completion Rate).
-- **Zgodność z RODO / ePrivacy (Brak Cookie Banner):**
-  - Rezygnacja z Google Analytics 4 na rzecz analityki bezciasteczkowej (*cookieless*).
-  - Wybór narzędzi: **Vercel Web Analytics** (ogólny ruch) + **Umami Cloud** lub **PostHog** (zdarzenia produktowe i lejki).
-  - Brak zbierania danych osobowych (PII) i brak profilowania reklamowego = **brak konieczności wyświetlania banera cookies** na ekranie mobilnym gracza.
+## 1. Cel biznesowy
 
----
+Analytics ma być gotowe przed soft-launchem i odpowiedzieć przede wszystkim na pytania:
 
-## 2. Architektura narzędziowa
+1. Ilu użytkowników wchodzi do Daily Quiz?
+2. Ilu faktycznie zaczyna quiz?
+3. Gdzie odpadają?
+4. Ilu kończy quiz?
+5. Ilu zapisuje wynik?
+6. Ilu wraca następnego dnia?
+7. Jaka jest retencja D1 i D7?
 
-| Narzędzie | Rola | Sposób wdrożenia | Koszt |
-| :--- | :--- | :--- | :--- |
-| **Vercel Web Analytics** | Ogólny ruch, geolokalizacja, typ urządzeń, Core Web Vitals | `@vercel/analytics/react` w root layout Next.js | 0 PLN (Hobby) |
-| **Umami Cloud** *(lub PostHog)* | Zdarzenia niestandardowe (*custom events*), lejki, analiza kampanii UTM | Skrypt asynchroniczny lub biblioteka JS | 0 PLN (Free tier do 10k zdarzeń/mc) |
+**North Star:** D1 i D7 retention oparte na faktycznej grze, nie na samym page view.
 
----
-
-## 3. Standard tagowania linków (Parametry UTM)
-
-Każdy link wychodzący do gry poza aplikacją **musi** posiadać parametry UTM, aby precyzyjnie identyfikować najskuteczniejsze kanały:
-
-### Struktura parametrów:
-- `utm_source`: Kanał / platforma (`twitter`, `whatsapp`, `messenger`, `fcbarca_forum`, `reddit`, `tiktok`)
-- `utm_medium`: Typ nośnika (`organic_post`, `share_button`, `community_post`, `bio_link`)
-- `utm_campaign`: Identyfikator akcji (np. `daily_challenge`, `weekend_boost`, `launch_mvp`)
-- `utm_content`: Opcjonalny wariant (np. `variant_a`, `hero_post`)
-
-### Przykłady linków produkcyjnych:
-1. **Przycisk udostępniania na WhatsApp (z aplikacji):**
-   `https://footquiz.pl/?utm_source=whatsapp&utm_medium=share_button&utm_campaign=daily_result`
-2. **Kafelkowy post gracza na X / Twitterze:**
-   `https://footquiz.pl/?utm_source=twitter&utm_medium=share_button&utm_campaign=daily_wordle`
-3. **Wpis na forum klubowym (np. fani Barcelony):**
-   `https://footquiz.pl/?utm_source=fcbarca_forum&utm_medium=community_post&utm_campaign=launch_mvp`
-4. **Link w bio profilu TikTok / Reels:**
-   `https://footquiz.pl/?utm_source=tiktok&utm_medium=bio_link&utm_campaign=profile`
+Stage 7 ma pozostać mały. Nie budujemy jeszcze BI, A/B testów, session replay, heatmap, marketing automation ani własnej platformy analitycznej.
 
 ---
 
-## 4. Rejestrowane zdarzenia produktowe (Custom Events)
+## 2. Decyzja narzędziowa
 
-W aplikacji śledzimy wyłącznie kluczowe punkty styku użytkownika z grą:
+### Wybrany provider: Umami Cloud EU
 
-### Zdarzenie 1: `quiz_started`
-- **Moment wywołania:** Gracz klika przycisk „Rozpocznij Wyzwanie Dnia”.
-- **Właściwości zdarzenia (Props):**
-  - `challenge_id`: string (np. "2026-09-08")
-  - `is_logged_in`: boolean (czy gracz jest zalogowany)
+Dla FootQuiz wybieramy **Umami Cloud EU** jako główne narzędzie Analytics MVP.
 
-### Zdarzenie 2: `question_answered`
-- **Moment wywołania:** Gracz zatwierdza odpowiedź na dane pytanie.
-- **Właściwości zdarzenia (Props):**
-  - `question_number`: integer (1 do 5)
-  - `is_correct`: boolean
-  - `time_taken_seconds`: float (czas reakcji)
+Powody:
+- obsługuje custom events,
+- obsługuje funnels,
+- obsługuje retention,
+- jest prostsze niż PostHog dla małego MVP,
+- ma privacy-first / cookieless podejście,
+- można ograniczyć zakres danych wysyłanych do providera,
+- provider nie musi być rozsiany po aplikacji dzięki małej warstwie abstrakcji,
+- w razie potrzeby w przyszłości można przejść na bardziej rozbudowane rozwiązanie bez zmiany całej aplikacji.
 
-### Zdarzenie 3: `quiz_completed` (Kluczowe)
-- **Moment wywołania:** Gracz odpowiada na ostatnie pytanie i widzi ekran podsumowania.
-- **Właściwości zdarzenia (Props):**
-  - `score`: integer (0 do 5)
-  - `total_time_seconds`: float
-  - `streak_count`: integer (aktualna seria dni)
+### Dlaczego nie PostHog teraz
 
-### Zdarzenie 4: `result_shared` (Kluczowe dla wiralowości)
-- **Moment wywołania:** Gracz klika przycisk kopiowania wyniku lub bezpośredni share na social media / komunikator.
-- **Właściwości zdarzenia (Props):**
-  - `platform`: string (`'whatsapp'` | `'x_twitter'` | `'clipboard'` | `'native_share'`)
-  - `score`: integer
+PostHog jest bardziej rozbudowany i może być lepszym wyborem później dla:
+- A/B testów,
+- feature flags,
+- zaawansowanych cohort,
+- eksperymentów onboardingowych,
+- bardziej złożonej segmentacji.
 
-### Zdarzenie 5: `match_predicted` (dla Etapu 2 – Typer)
-- **Moment wywołania:** Gracz zatwierdza swój typ na Mecz Dnia (1 / X / 2).
-- **Właściwości zdarzenia (Props):**
-  - `match_id`: string
-  - `selected_outcome`: string ('1' | 'X' | '2')
+Na etapie soft-launchu FootQuiz byłby jednak szerszy niż obecne potrzeby.
+
+### Vercel Analytics
+
+Nie jest częścią obowiązkowego Stage 7 MVP. Można go dodać później jako lekkie uzupełnienie ogólnego ruchu / Web Vitals, ale nie jest potrzebny do policzenia głównego lejka i retencji produktu.
 
 ---
 
-## 5. Implementacja kodu w Next.js (App Router)
+## 3. Zasada implementacyjna
 
-### A. Wdrożenie Vercel Analytics w `app/layout.tsx`:
-```tsx
-import { Analytics } from '@vercel/analytics/react';
+Kod aplikacji nie powinien bezpośrednio zależeć od API Umami w wielu miejscach.
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return (
-    <html lang="pl">
-      <body>
-        {children}
-        <Analytics/>
-      </body>
-    </html>
-  );
-}
+Preferowana warstwa:
 
-### B. Moduł wysyłania zdarzeń lib/analytics.ts:
+```ts
+track(eventName, properties)
+```
 
-// Bezpieczna funkcja pomocnicza do rejestrowania zdarzeń w Umami / PostHog
-export function trackEvent(eventName: string, eventData?: Record<string, any>) {
-  if (typeof window !== 'undefined' && (window as any).umami) {
-    (window as any).umami.track(eventName, eventData);
-  }
-}
+Przykładowo:
 
-### C. Przykład użycia przy udostępnieniu wyniku:
+```ts
+track('quiz_completed', {
+  score: 4,
+  total_questions: 5,
+});
+```
 
-import { trackEvent } from '@/lib/analytics';
+Provider ma być detalem implementacyjnym wewnątrz modułu analityki, np. `src/lib/analytics.ts`.
 
-const handleShareWhatsApp = (score: number) => {
-  trackEvent('result_shared', { platform: 'whatsapp', score });
-  
-  const text = encodeURIComponent(
-    `FootQuiz: ${score}/5! Pobijesz mój wynik? [https://footquiz.pl/?utm_source=whatsapp&utm_medium=share_button](https://footquiz.pl/?utm_source=whatsapp&utm_medium=share_button)`
-  );
-  window.open(`[https://wa.me/?text=$](https://wa.me/?text=$){text}`, '_blank');
-};
+Dzięki temu późniejsza zmiana providera nie wymaga przepisywania komponentów quizu.
 
+---
 
-6. Kluczowe wskaźniki efektywności (Dashboard KPI)
-Completion Rate: (Liczba quiz_completed / Liczba quiz_started) * 100% (Cel: > 85%).
+## 4. Anonymous identity
 
-K-Factor (Współczynnik wiralowości): Średnia liczba wejść z linków share_button na jednego aktywnego gracza.
+### Istniejąca gameplay identity
 
-D1 Retention: Procent graczy, którzy wracają następnego dnia (Cel: > 25%).
+FootQuiz już posiada anonimową tożsamość do zabezpieczenia attempts:
+- losowy sekret w HttpOnly cookie,
+- SHA-256 tego sekretu przechowywany po stronie DB.
 
-Skuteczność kanałów: Ranking źródeł UTM wg konwersji na ukończenie quizu.
+Tych wartości **nie wolno używać jako analytics identity**.
+
+Nie wysyłamy do Umami:
+- `footquiz-anon` / dev cookie,
+- `anonymous_token_hash`,
+- sekretów Supabase,
+- username jako analytics identity.
+
+### Analytics identity
+
+Dla Analytics MVP preferowany jest **oddzielny, losowy `analytics_id`**, niezależny od gameplay identity.
+
+Cel:
+- pozwolić połączyć aktywność tego samego anonimowego gracza między dniami,
+- nie mieszać domeny bezpieczeństwa gameplay z analityką,
+- przygotować grunt pod późniejsze anonymous → authenticated identity linking.
+
+`analytics_id` nie powinien dawać żadnego dostępu do quizu, attempts ani konta.
+
+Szczegół mechanizmu persistence i integracji z Umami Distinct ID należy potwierdzić podczas implementacji Stage 7.
+
+---
+
+## 5. Minimalny event taxonomy
+
+### `quiz_viewed`
+**Moment:** użytkownik dotarł do widoku Daily Quiz.  
+**Cel:** górna część lejka.
+
+Minimalne properties:
+- `challenge_date` lub równoważny bezpieczny identyfikator dnia,
+- opcjonalnie źródło/UTM, jeśli jest już dostępne w warstwie analityki.
+
+### `quiz_started`
+**Moment:** backend potwierdził utworzenie lub wznowienie realnego attemptu i UI przechodzi do aktywnej gry.  
+**Cel:** początek faktycznej aktywacji produktu.
+
+Minimalne properties:
+- `challenge_date`,
+- `resumed`: boolean.
+
+### `question_answered`
+**Moment:** odpowiedź została zaakceptowana i utrwalona przez backend.  
+**Cel:** mierzenie miejsca porzucenia quizu.
+
+Minimalne properties:
+- `question_number`: 1..5,
+- `correct`: boolean,
+- `timed_out`: boolean.
+
+Nie wysyłamy:
+- treści pytania,
+- options,
+- `selectedIndex`,
+- `correctIndex`,
+- explanation,
+- `questionId`, jeśli nie jest niezbędny do analizy MVP.
+
+### `quiz_completed`
+**Moment:** backend potwierdził ukończony attempt / wynik jest dostępny jako completed state.  
+**Cel:** najważniejszy event retencyjny.
+
+Minimalne properties:
+- `score`: 0..5,
+- `total_questions`: 5.
+
+Nie wysyłamy client-trusted czasu.
+
+### `result_saved`
+**Moment:** wynik został zapisany/finalized i użytkownik otrzymał potwierdzony rezultat.  
+**Cel:** mierzenie completion → saved result.
+
+Minimalne properties:
+- `score`,
+- `total_questions`.
+
+Nie wysyłamy username.
+
+### `leaderboard_viewed`
+**Moment:** użytkownik zobaczył poprawnie załadowany ranking.  
+**Cel:** zainteresowanie społeczną warstwą produktu.
+
+### Eventy odłożone
+
+`share_clicked` / `result_shared` trafiają do Stage 11 — Share / virality MVP, chyba że share flow zostanie wdrożony wcześniej.
+
+`match_predicted`, streak events, Auth events i achievementy są poza Stage 7.
+
+---
+
+## 6. Funnel MVP
+
+```text
+quiz_viewed
+→ quiz_started
+→ question_answered #1
+→ question_answered #2
+→ question_answered #3
+→ question_answered #4
+→ question_answered #5
+→ quiz_completed
+→ result_saved
+```
+
+`question_number` pozwala używać jednego eventu zamiast pięciu nazw.
+
+Najważniejsza metryka funnelowa:
+
+```text
+Completion Rate = quiz_completed / quiz_started
+```
+
+---
+
+## 7. Definicja retencji
+
+### Day 0 cohort
+Do cohorty Day 0 wchodzi użytkownik, który po raz pierwszy wykonał `quiz_completed`.
+
+### D1
+**Core D1:** ten sam użytkownik wykonuje `quiz_completed` następnego dnia.
+
+Pomocniczo:
+**Return D1:** ten sam użytkownik wykonuje `quiz_started` następnego dnia.
+
+### D7
+**Core D7:** `quiz_completed` siódmego dnia po Day 0.
+
+North Star dla FootQuiz pozostaje oparta przede wszystkim o **Core D1 / Core D7**.
+
+---
+
+## 8. Attribution / UTM
+
+Minimalne parametry:
+- `utm_source`,
+- `utm_medium`,
+- `utm_campaign`,
+- opcjonalnie `utm_content`.
+
+Na Stage 7 trzeba co najmniej zachować możliwość przypisania pierwszego / bieżącego źródła ruchu do eventów potrzebnych do podstawowej analizy kanałów.
+
+Nie rozbudowujemy jeszcze attribution modelu ponad potrzeby soft-launchu.
+
+---
+
+## 9. Privacy / GDPR / ePrivacy
+
+Zasady MVP:
+- minimalizacja danych,
+- brak PII,
+- brak username w analytics,
+- brak gameplay secretów i hashy,
+- brak treści pytań i odpowiedzi,
+- brak session replay,
+- brak heatmaps,
+- brak reklamowego profilowania,
+- EU region providera.
+
+Umami ma privacy-first / cookieless podejście, ale wdrożenie osobnego trwałego `analytics_id` do D1/D7 trzeba traktować jako osobną decyzję privacy.
+
+Nie zapisujemy kategorycznego stwierdzenia „cookie banner nie jest potrzebny”. Przed publicznym ruchem należy sprawdzić finalny sposób persistence `analytics_id` i wynikające z niego obowiązki informacyjne / consent w kontekście Polski i UE.
+
+---
+
+## 10. Ochrona przed błędnymi eventami
+
+Zasady:
+- event failure nie blokuje quizu,
+- trackowanie jest best-effort,
+- Strict Mode / retry / refresh nie powinny generować oczywistych duplikatów kluczowych eventów,
+- `quiz_started`, `question_answered`, `quiz_completed`, `result_saved` powinny być emitowane dopiero po potwierdzeniu odpowiedniej akcji przez backend,
+- nie polegamy na kliknięciu klienta jako źródle prawdy dla ukończenia i wyniku.
+
+---
+
+## 11. Test plan Stage 7
+
+Automatycznie / mocked:
+- eventy wywołują się tylko w oczekiwanych stanach,
+- retry nie duplikuje kluczowych eventów,
+- safe properties whitelist,
+- brak secretów / hashy / username / question content w payloadzie,
+- analytics failure nie blokuje flow.
+
+Manualnie:
+- realne eventy pojawiają się w Umami Cloud EU,
+- funnel ma prawidłową kolejność,
+- jeden ukończony quiz generuje oczekiwany zestaw eventów,
+- refresh/resume nie produkuje oczywistych duplikatów,
+- payloady są przejrzane w DevTools,
+- test powrotu tego samego `analytics_id` potwierdza możliwość liczenia D1.
+
+---
+
+## 12. Scope Stage 7
+
+W Stage 7 implementujemy tylko:
+- Umami Cloud EU,
+- cienką warstwę `track(...)`,
+- anonymous analytics identity,
+- minimalne eventy produktu,
+- funnel,
+- D1/D7 retention,
+- podstawowe UTM attribution.
+
+Nie implementujemy:
+- Auth,
+- streaków,
+- achievements,
+- Typera Dnia,
+- share flow,
+- A/B tests,
+- session replay,
+- heatmaps,
+- marketing automation,
+- własnej hurtowni analytics,
+- rozbudowanego BI.
+
+---
+
+## 13. Definition of Done
+
+Stage 7 jest DONE, gdy:
+- Umami Cloud EU działa w środowisku docelowym,
+- kluczowe eventy są wysyłane bez danych wrażliwych,
+- potrafimy zbudować funnel Daily Quiz,
+- potrafimy policzyć Core D1 i Core D7 dla anonimowego użytkownika,
+- źródło ruchu / UTM jest dostępne do podstawowej segmentacji,
+- implementacja nie wpływa na niezawodność quizu,
+- manualny dashboard smoke test przechodzi.
