@@ -2,80 +2,50 @@
 
 ## Stan obecny
 
-Opis implementacji na 2026-09-10. Quiz używa Route Handlers Next.js, nie Server Actions. Nie istnieje serwerowa tabela ani mechanizm `quiz_attempts`.
+Stage 5, 2026-09-11. Quiz używa Route Handlers Next.js i serwerowych quiz attempts. Jedyna wspierana ścieżka tworzenia wyniku w kodzie aplikacji to:
+Daily Quiz → zapisane odpowiedzi próby → POST /api/quiz/attempt/finish → RPC finish_quiz_attempt → quiz_results z attempt_id.
 
 ### Pobranie pytań
 
-`getDailyQuestions()` w `src/services/quizService.ts` wywołuje `GET /api/quiz/daily` z `cache: no-store`. Nie wykonuje anonimowego SELECT do `questions` ani `daily_challenges`.
+`getDailyQuestions()` wywołuje `GET /api/quiz/daily` z `cache: no-store`. Serwer używa `SUPABASE_SECRET_KEY`, wybiera dzisiejszy challenge według UTC i zwraca pytania w kolejności `question_ids`: tylko `id, category, difficulty, question, options, tags`. Nie zwraca `correct_index` ani `explanation`. Frontend nie potrzebuje anonimowego SELECT do questions/daily_challenges.
 
-Handler w `src/app/api/quiz/daily/route.ts`:
+### Start i wznowienie
 
-1. Używa `NEXT_PUBLIC_SUPABASE_URL` i serwerowego `SUPABASE_SECRET_KEY`.
-2. Wyznacza datę UTC przez `new Date().toISOString().split('T')[0]`.
-3. Pobiera dzisiejszy `daily_challenges.question_ids`.
-4. Wymaga niepustej listy unikalnych ID i pełnego zestawu istniejących pytań.
-5. Odtwarza kolejność według `question_ids`, niezależnie od kolejności rekordów zwróconych przez bazę.
-6. Zwraca tablicę zawierającą tylko `id`, `category`, `difficulty`, `question`, `options`, `tags`.
-
-GET nie zwraca `correct_index` ani `explanation`. Odpowiedź ma `Cache-Control: no-store`; handler jest `force-dynamic`. Brak wyzwania daje 404, błędy konfiguracji/bazy lub niekompletny zestaw — 500. Klient zamienia błąd pobrania na `null`, a ekran quizu pokazuje komunikat błędu.
+`POST /api/quiz/attempt/start` tworzy lub wznawia próbę dla anonimowej tożsamości z HttpOnly cookie. Frontend porównuje identyfikatory i kolejność pytań z daily, sprawdza prefiks zapisanych odpowiedzi i odtwarza pierwsze nierozwiązane pytanie przez `nextQuestionId`.
 
 ### Udzielenie odpowiedzi
 
-`QuestionScreen` ma domyślny timer 15 s. Kliknięcie wysyła `POST /api/quiz/answer` z `{ questionId, selectedIndex }`; timeout wysyła `selectedIndex: -1`. Podczas sprawdzania przyciski są zablokowane.
+`QuestionScreen` wysyła `{ attemptId, questionId, selectedIndex }` do `POST /api/quiz/answer`. Timeout 15 s wysyła indeks -1. Handler używa istniejącej tożsamości i RPC `record_quiz_attempt_answer`, które sprawdza właściciela, dzień UTC, przynależność i kolejność pytania oraz utrwala pierwszy wybór przed feedbackiem.
 
-Handler sprawdza UUID i całkowity indeks -1..3. Przed odczytem rozwiązania sprawdza przynależność pytania do dzisiejszego challenge w UTC. Obce ID daje 403 bez rozwiązania. Brak wyzwania/pytania daje 404; błędne wejście 400, problemy danych lub serwera 500.
-
-Serwer pobiera `correct_index` i `explanation`, sprawdza indeks z bazy jako integer 0..3 i zwraca:
-
-```js
-{ correct: boolean, correctIndex: number, explanation: string }
-```
-
-Timeout zawsze daje `correct: false`. Brak wyjaśnienia w bazie jest zamieniany na pusty tekst. UI dopiero po odpowiedzi API ustawia podświetlenie i pokazuje wyjaśnienie. Następnie przekazuje poprawność i wybrany indeks do kontenera quizu.
+Publiczna odpowiedź to `{ correct, correctIndex, explanation, replayed }`. Timeout daje correct=false. Identyczny retry otwartej, dzisiejszej próby jest sukcesem; próba zmiany wyboru daje konflikt. Przy niepewnym zapisie UI pozwala ponowić tylko ten sam wybór albo zsynchronizować stan. Potwierdzona odpowiedź trafia do stanu przed kliknięciem „Następne”.
 
 ### Stan lokalny i podsumowanie
 
-`src/app/quiz/page.tsx` zachowuje osobno tablicę poprawności `answers` oraz wybory `submittedAnswers: [{ questionId, selectedIndex }]`.
+Odpowiedzi serwera są źródłem prawdy. Historyczne klucze `footquiz_completed_*` nie sterują postępem i nie są importowane do prób. `attemptId` nie trafia do localStorage. `footquiz_username` jest wyłącznie opcjonalną preferencją UX.
 
-Po ukończeniu zapisuje w `localStorage` pod kluczem `footquiz_completed_YYYY-MM-DD`: lokalny `score`, `totalQuestions`, `answers`, `submittedAnswers`, `completedAt`. Nick przechowuje pod `footquiz_username`. Klucz daty jest oparty na UTC po stronie klienta.
-
-Po ponownym wejściu odtwarza ukończone podsumowanie. Stary zapis bez `submittedAnswers` albo bez poprawnych indeksów nie jest traktowany jako kompletna próba do API. Historyczna tablica `answers` nadal służy do wyświetlenia kafelków i wyniku. Formularz zapisu jest zastępowany informacją o braku kompletu wyborów. Podsumowanie nadal zależy od pobrania dzisiejszych pytań.
-
-Przycisk „Powtórz” resetuje bieżącą grę i pozwala rozegrać zestaw ponownie. `alreadyCompleted` jest przekazywane do podsumowania, ale nie stanowi serwerowej blokady.
-
-Podsumowanie i udostępniany tekst korzystają z lokalnego wyniku. Odpowiedź serwera po zapisie nie zastępuje tych wartości. Web Share lub schowek udostępnia wynik i kafelki bez czasu, numeru wyzwania i UTM.
+SummaryScreen obsługuje wyłącznie attempts. `ready_to_finish` udostępnia formularz nicku i finalizację; `completed` wyświetla wynik serwerowy bez formularza i bez „Powtórz”. Kafelki i udostępnianie pozostają dostępne. Refresh podczas feedbacku prowadzi do pierwszego nierozwiązanego pytania.
 
 ### Zapis wyniku
 
-Obie trasy `POST /api/quiz/result` i `POST /quiz/result` eksportują tę samą funkcję `saveQuizResult` z `src/server/saveQuizResult.ts`, oznaczonego `server-only`. Nie ma dwóch implementacji walidacji.
+`POST /api/quiz/attempt/finish` przyjmuje dokładnie `{ attemptId, username }`. Nick jest wymagany, trimowany i ograniczony do 20 punktów kodowych. Endpoint wymaga zaufanego Origin i istniejącego cookie; nie tworzy ani nie odświeża tożsamości.
 
-Klient wysyła wyłącznie:
+Jedynym wywołaniem DB jest `finish_quiz_attempt`. RPC atomowo liczy wynik z utrwalonych odpowiedzi w kolejności challenge, zapisuje quiz_results z attempt_id i ustawia completed_at. Retry zakończonej próby zwraca ten sam wynik. Klient nie przesyła score ani pattern.
 
-```js
-{ username: string, answers: [{ questionId: string, selectedIndex: number }] }
-```
+Finish zwraca zmapowany wynik i replayed, bez completedAt. Frontend zachowuje potwierdzenie zapisu i synchronizuje pełny stan przez start. Błąd synchronizacji nie przywraca formularza ani nie unieważnia potwierdzonego wyniku. Retry niepewnej finalizacji zachowuje dokładny attemptId i znormalizowany username.
 
-Handler:
+### Historia: wycofanie legacy w Stage 5
 
-- Odrzuca dodatkowe pola, w tym dawny kontrakt `score`, `total_questions`, `answers_pattern`.
-- Waliduje nick po trim: 1–20 znaków.
-- Sprawdza UUID, indeks integer -1..3, duplikaty ID po lowercase i pełną zgodność odpowiedzi z dzisiejszym zestawem.
-- Pobiera poprawne indeksy z bazy i sprawdza ich zakres 0..3.
-- Odtwarza kolejność z `question_ids`; kolejność przesłanej tablicy nie wpływa na wzór.
-- Wylicza `score`, `answers_pattern` z bitów 1/0 i `total_questions` z długości challenge. Timeout daje 0.
-- Zapisuje nick i te wartości do `quiz_results` wraz z `played_at` wyznaczonym raz dla żądania w UTC.
-
-Nie zapisuje `time_taken`, `user_id`, `challenge_id` ani historii wyborów. Zwraca `{ success: true, result }`. Błędne żądania są odrzucane przed zapisem; UI pokazuje błąd zapisu i odblokowuje formularz.
+Usunięto `/api/quiz/result`, `/quiz/result`, serwerowy i kliencki `saveQuizResult` oraz stary formularz i typy. Po wdrożeniu nowego builda stare adresy nie mają handlerów (oczekiwane 404); nie ma fallbacku ani przekierowania zapisu. Starszy klient musi odświeżyć aplikację. Historyczne testy Stage 3/4 pozostają w [testing.md](../testing.md).
 
 ## Znane ograniczenia / planowane zmiany
 
-- Pięć pytań jest celem produktu; kod obsługuje długość challenge i nie wymusza dokładnie pięciu.
-- Brak automatycznego generowania/publikowania dziennego zestawu.
-- Brak serwerowej próby, zapamiętywania pierwszych odpowiedzi i ochrony przed ponownym zapisem. Serwer przelicza przesłane wybory, ale nie potwierdza ich historii.
-- Timer jest lokalny; serwer nie mierzy czasu ani nie wymusza timeoutu.
-- Zmiana dnia UTC lub zestawu w trakcie gry może unieważnić zapis. Zestaw nie ma wersji ani migawki na czas próby.
-- Strona główna wyświetla datę lokalną przeglądarki, a quiz używa UTC. Komunikat „jutro o 00:00” nie precyzuje strefy.
-- Lokalne podsumowanie może różnić się od wyniku przeliczonego przy zapisie; stare podsumowania wymagają dostępnego dzisiejszego zestawu.
-- Ranking to TOP 10, mimo celu TOP 50; czas nie jest zapisywany. Streak i rekord strony głównej są placeholderami.
+- Stage 5 zamyka alternatywne zapisy w kodzie aplikacji, nie ustanawia zakazu każdego bezpośredniego INSERT w DB. service_role zachowuje INSERT; finish_quiz_attempt jest SECURITY INVOKER.
+- Historyczne quiz_results z attempt_id=NULL pozostają bez zmian; kolumna nadal jest nullable.
+- Reset cookie/incognito umożliwia nową tożsamość.
+- Timer jest klientowy i resetuje się po refresh nierozwiązanego pytania.
+- Start dotyczy dzisiejszego UTC; otwarta próba z poprzedniego dnia wygasa. Brak migawki pytań/zestawu.
+- Brak wymuszenia dokładnie pięciu pytań i automatycznej publikacji dziennych zestawów.
+- Ranking pozostaje TOP 10; time_taken nie jest zapisywany, streak i rekord strony głównej są placeholderami.
+- Rzeczywiste testy dwóch sesji i wymuszonego rollbacku pozostają odłożone.
 
-Sesje/próby, Auth i rozszerzona ochrona są przyszłymi zadaniami, nie istniejącą architekturą. Szczegóły: [bezpieczeństwo i dostęp do danych](security-and-data-access.md).
+Szczegóły granicy dostępu: [bezpieczeństwo i dostęp do danych](security-and-data-access.md).

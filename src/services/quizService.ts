@@ -2,8 +2,7 @@ import type { QuizAttemptFinishRequest, QuizAttemptFinishResponse } from '@/type
 import type { QuizAttemptAnswerRequest, QuizAnswerFeedback, QuizAttemptStartResponse } from '@/types/quizAttempt';
 // Plik: src/services/quizService.ts
 
-import { supabase } from '@/lib/supabase';
-import { PublicQuestion, QuizResultRequest } from '@/types/quiz';
+import { PublicQuestion } from '@/types/quiz';
 
 /**
  * POBIERANIE CODZIENNEGO QUIZU
@@ -34,65 +33,23 @@ export async function getDailyQuestions(): Promise<PublicQuestion[] | null> {
  * do wyświetlenia rankingu.
  */
 export interface LeaderboardEntry {
-  id?: string;
+  id: string;
   username: string;
   score: number;
-  total_questions: number;
-  time_taken?: number;
-  played_at?: string;
+  totalQuestions: number;
 }
 
 export async function getTodayLeaderboard(): Promise<LeaderboardEntry[]> {
-  const today = new Date().toISOString().split('T')[0];
-
-  const { data, error } = await supabase
-    .from('quiz_results')
-    .select(`
-      id,
-      username,
-      score,
-      total_questions,
-      time_taken,
-      played_at
-    `)
-    .eq('played_at', today)
-    .order('score', { ascending: false })
-    .order('time_taken', { ascending: true })
-    .limit(10);
-
-  if (error) {
-    console.error('Error fetching leaderboard:', error);
-    return [];
+  const data = await readQuizResponse(await fetch('/api/quiz/leaderboard', { cache: 'no-store' }));
+  const rows = (data as { leaderboard?: unknown } | null)?.leaderboard;
+  if (!Array.isArray(rows) || rows.length > 10 || !rows.every(row =>
+    row && typeof row.id === 'string' && typeof row.username === 'string' &&
+    Number.isInteger(row.score) && Number.isInteger(row.totalQuestions))) {
+    throw new QuizApiError('INVALID_RESPONSE');
   }
-
-  return data as LeaderboardEntry[];
+  return rows.map(({ id, username, score, totalQuestions }) => ({ id, username, score, totalQuestions }));
 }
 
-
-/**
- * ZAPIS WYNIKU
- *
- * Wynik NIE jest zapisywany bezpośrednio do Supabase
- * z przeglądarki.
- *
- * Przeglądarka wysyła dane do naszego endpointu API,
- * a backend zajmuje się zapisem i walidacją.
- */
-export async function saveQuizResult(result: QuizResultRequest) {
-  const response = await fetch('/api/quiz/result', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(result),
-  });
-
-  if (!response.ok) {
-    throw new Error('Nie udało się zapisać wyniku.');
-  }
-
-  return await response.json();
-}
 /** Only the in-flight start is shared; settled resume state is never cached. */
 let startingAttempt: Promise<unknown> | null = null;
 

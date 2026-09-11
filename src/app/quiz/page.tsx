@@ -220,8 +220,6 @@ export default function QuizContainer() {
             score={score}
             totalQuestions={completedResult?.totalQuestions ?? questions.length}
             answers={answers}
-            submittedAnswers={null}
-            alreadyCompleted={attempt.state === 'completed'}
             attemptState={attempt.state === 'completed' ? 'completed' : 'ready_to_finish'}
           />
         )}

@@ -33,12 +33,3 @@ export interface QuizState {
   answers: (number | null)[];
   isFinished: boolean;
 }
-export interface QuizAnswer {
-  questionId: string;
-  selectedIndex: number;
-}
-
-export interface QuizResultRequest {
-  username: string;
-  answers: QuizAnswer[];
-}

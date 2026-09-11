@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Play, Trophy, Calendar, Zap, TrendingUp, Loader2 } from 'lucide-react';
 import { getTodayLeaderboard, LeaderboardEntry } from '@/services/quizService';
@@ -8,6 +8,7 @@ import { getTodayLeaderboard, LeaderboardEntry } from '@/services/quizService';
 export default function HomePage() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [leaderboardError, setLeaderboardError] = useState(false);
 
   const stats = {
     currentStreak: 1,
@@ -20,20 +21,21 @@ export default function HomePage() {
     year: 'numeric'
   });
 
-  useEffect(() => {
-    async function loadLeaderboard() {
-      try {
-        const data = await getTodayLeaderboard();
-        setLeaderboard(data);
-      } catch (err) {
-        console.error('Failed to load leaderboard:', err);
-      } finally {
-        setLoading(false);
-      }
+  const loadLeaderboard = useCallback(async () => {
+    setLoading(true);
+    setLeaderboardError(false);
+    try {
+      setLeaderboard(await getTodayLeaderboard());
+    } catch {
+      setLeaderboardError(true);
+    } finally {
+      setLoading(false);
     }
-
-    loadLeaderboard();
   }, []);
+
+  useEffect(() => {
+    void loadLeaderboard();
+  }, [loadLeaderboard]);
 
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
@@ -109,6 +111,13 @@ export default function HomePage() {
                 <Loader2 className="animate-spin mr-2" size={20} />
                 Ładowanie wyników...
               </div>
+            ) : leaderboardError ? (
+              <div className="bg-slate-50 rounded-2xl p-6 text-center text-slate-500 text-sm font-medium">
+                <p role="alert">Nie udało się wczytać dzisiejszego rankingu.</p>
+                <button onClick={() => void loadLeaderboard()} className="mt-3 font-bold text-blue-600">
+                  Spróbuj ponownie
+                </button>
+              </div>
             ) : leaderboard.length === 0 ? (
               <div className="bg-slate-50 rounded-2xl p-6 text-center text-slate-500 text-sm font-medium">
                 Bądź pierwszy i zagraj dzisiaj!
@@ -123,7 +132,7 @@ export default function HomePage() {
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-bold text-blue-600">
-                        {leader.score}/{leader.total_questions}
+                        {leader.score}/{leader.totalQuestions}
                       </span>
                     </div>
                   </div>

@@ -349,3 +349,33 @@ The basic finalization flow is verified; the following are not marked complete:
 - Cleanup/decommission of the legacy result routes is deferred.
 
 The remaining Origin, malformed-cookie and network edge cases are not promoted to manually verified by these seven tests.
+
+## 9. Stage 5 - legacy result decommission
+
+Legacy /api/quiz/result and /quiz/result Route Handlers, server/client saveQuizResult, legacy request types and SummaryScreen branches have been removed. SummaryScreen now supports attempts only.
+
+The sole supported application write path is Daily Quiz → persisted attempt answers → POST /api/quiz/attempt/finish → finish_quiz_attempt → quiz_results with attempt_id. Stage 3/4 descriptions above are historical checkpoints; their statements that legacy routes remained reachable no longer describe the Stage 5 code.
+
+### Scope and database boundary
+
+No SQL, migrations, schema, SQL tests or historical data were changed. Historical rows with attempt_id=NULL remain supported. service_role retains INSERT and finish_quiz_attempt remains SECURITY INVOKER; Stage 5 does not prohibit every direct database INSERT. DB-level hardening is deferred.
+
+### Automated verification
+
+- Full TypeScript typecheck - **PASS**.
+- npm.cmd run build - **PASS**; neither legacy result route appears in the build route list.
+- Local regression script with mocked dependencies - **13 checks PASS**: finish/replay, identical retry, confirmed finish with failed resync/storage, completed resume, SummaryScreen visibility/sharing and unchanged ranking reads including historical rows.
+- Application source search - no legacy route, save function or request-type references; only finish RPC creates quiz_results.
+- git diff --check - **PASS**.
+
+The repository has no persisted application test runner/script; regression checks ran in memory using the existing Next.js compiler and mocks, with no network or SQL. The first build encountered stale generated .next/dev/types/validator.ts imports of removed routes; that generated file was removed and the build passed. No configuration change was required. No manual Stage 5 tests are claimed as PASS.
+
+### Manual verification - pending
+
+- Complete the quiz, finalize, then refresh the completed result.
+- Retry finish: same result, no duplicate.
+- POST old valid payloads to both removed routes: expected 404 after deploying the new build, no result insertion.
+- Browser Network uses only attempt/finish for result creation.
+- Ranking still shows historical and new results; NULL attempt_id rows are untouched.
+- Admin opens normally; summary sharing, nickname and identical retry still work.
+- Real two-session concurrency and forced rollback remain deferred, not covered by removing routes.
