@@ -4,54 +4,65 @@ This document records tests that have actually been executed for FootQuiz. It is
 
 ## Test environment
 
-- Initial test date: 2026-09-10; Stage 4 manual results reported on 2026-09-11.
-- Environment: development / MVP
-- Database: development Supabase project
+- Initial test date: 2026-09-10.
+- Stage 4–5.1 manual results: 2026-09-11.
+- Environment: development / MVP.
+- Database: development Supabase project.
 - Production was not used.
 - Manual API tests were executed from the browser against the local Next.js application (`localhost:3000`) connected to the development database.
 - Secrets, anonymous cookie values and owner hashes are intentionally not recorded here.
+
+---
 
 ## 1. Quiz attempts database migration
 
 The `quiz_attempts` migration was applied to the development Supabase database.
 
-The migration introduced the server-side quiz-attempt model, including `quiz_attempts`, `quiz_attempt_answers`, the `quiz_results.attempt_id` relationship, and the RPCs used to record answers and finish attempts.
+The migration introduced:
 
-### Automated SQL verification
+- `quiz_attempts`,
+- `quiz_attempt_answers`,
+- `quiz_results.attempt_id`,
+- RPC `record_quiz_attempt_answer`,
+- RPC `finish_quiz_attempt`.
+
+### Automated SQL verification — PASS
 
 `supabase/tests/quiz_attempts.sql` was executed against the development database and completed without an error.
 
-Verified by this test suite include:
+Verified by this test suite:
 
-- attempt constraints and foreign keys;
-- anonymous owner-hash validation;
-- answer index validation;
-- challenge membership and question order;
-- first-answer immutability;
-- idempotent replay of the same answer;
-- timeout handling (`selected_index = -1`);
-- result calculation from persisted answers;
-- result ordering according to the challenge question order;
-- completion retry behavior;
+- attempt constraints and foreign keys,
+- anonymous owner-hash validation,
+- answer index validation,
+- challenge membership and question order,
+- first-answer immutability,
+- idempotent replay of the same answer,
+- timeout handling (`selected_index = -1`),
+- result calculation from persisted answers,
+- result ordering according to challenge question order,
+- completion retry behavior,
 - relevant RLS and privilege restrictions.
 
-The test runs inside a transaction. Because a real daily challenge already existed in the development database, the test temporarily moved its date, created its own fixture challenge, and ended with `ROLLBACK`.
+The test runs inside a transaction. Because a real daily challenge already existed in the development database, the test temporarily moved its date, created fixture data and ended with `ROLLBACK`.
 
 Post-test verification confirmed:
 
-- the original daily challenge was restored with its original date and question order;
-- fixture questions remaining: `0`;
-- fixture attempts remaining: `0`;
+- original daily challenge restored with original date and question order,
+- fixture questions remaining: `0`,
+- fixture attempts remaining: `0`,
 - fixture results remaining: `0`.
 
-### Not yet verified at database level
+### Deferred database-level verification
 
-The following tests remain deliberately deferred until a suitable local PostgreSQL/Supabase environment is available:
+The following remain deliberately unverified:
 
-- real two-session concurrency scenarios documented in `supabase/tests/quiz_attempts-concurrency.md`;
+- real two-session concurrency scenarios from `supabase/tests/quiz_attempts-concurrency.md`,
 - injected failure between result insertion and attempt completion to independently prove rollback/atomicity under forced failure.
 
 These scenarios are **not considered tested**.
+
+---
 
 ## 2. `POST /api/quiz/attempt/start`
 
@@ -59,323 +70,499 @@ Manual runtime verification was performed against the local Next.js application 
 
 ### First start — PASS
 
-A POST request with no query parameters and no body was sent from the browser.
-
 Observed:
 
-- HTTP `201`;
-- `resumed: false`;
-- `state: "in_progress"`;
-- `answers: []`;
-- `completedAt: null`;
-- `result: null`;
-- response contained the expected daily challenge;
-- `questionIds` contained all 5 challenge questions in the correct order;
+- HTTP `201`,
+- `resumed: false`,
+- `state: "in_progress"`,
+- `answers: []`,
+- `completedAt: null`,
+- `result: null`,
+- expected daily challenge returned,
+- all 5 challenge question IDs returned in correct order,
 - `nextQuestionId` pointed to the first question.
 
-### Resume with the same anonymous cookie — PASS
-
-The same request was sent again from the same browser context.
+### Resume with same anonymous cookie — PASS
 
 Observed:
 
-- HTTP `200`;
-- `resumed: true`;
-- the same `attemptId` was returned;
-- the same `startedAt` was returned;
-- challenge and question order were unchanged;
-- `answers` remained empty;
-- `nextQuestionId` still pointed to the first unanswered question.
+- HTTP `200`,
+- `resumed: true`,
+- same `attemptId`,
+- same `startedAt`,
+- same challenge and question order,
+- `answers` unchanged,
+- `nextQuestionId` pointed to the first unanswered question.
 
 This confirms the basic start/resume path for an existing anonymous browser identity.
 
+---
+
 ## 3. `POST /api/quiz/answer`
 
-Manual runtime verification was performed using the attempt created above. Answers were persisted to the development database through `record_quiz_attempt_answer`.
+Manual runtime verification was performed using a real attempt. Answers were persisted through `record_quiz_attempt_answer`.
 
 ### First correct answer — PASS
 
-The first challenge question was answered with its correct option.
-
 Observed:
 
-- HTTP `200`;
-- `correct: true`;
-- expected `correctIndex`;
-- explanation returned as a string;
+- HTTP `200`,
+- `correct: true`,
+- expected `correctIndex`,
+- explanation returned,
 - `replayed: false`.
 
 ### Identical retry — PASS
 
-The exact same answer was submitted again for the already answered question.
-
 Observed:
 
-- HTTP `200`;
-- the same feedback was returned;
-- `correct: true`;
+- HTTP `200`,
+- same feedback,
+- `correct: true`,
 - `replayed: true`.
 
-This confirms idempotent replay of the same persisted answer.
-
-### Attempt to change an already recorded answer — PASS
-
-A different option was then submitted for the same question.
+### Attempt to change recorded answer — PASS
 
 Observed:
 
-- HTTP `409`;
-- public error code `ANSWER_ALREADY_RECORDED`.
+- HTTP `409`,
+- `error.code: ANSWER_ALREADY_RECORDED`.
 
-The previously accepted answer was not replaced. This confirms the intended first-answer immutability behavior in the tested flow.
+The previously accepted answer was not replaced.
 
-### Question outside the challenge — PASS
-
-A valid UUID that was not one of the current challenge question IDs was submitted.
+### Question outside challenge — PASS
 
 Observed:
 
-- HTTP `403`;
-- public error code `QUESTION_NOT_IN_CHALLENGE`.
+- HTTP `403`,
+- `error.code: QUESTION_NOT_IN_CHALLENGE`.
 
-No answer was recorded for this request.
+No answer was recorded.
 
-### Incorrect answer on the next question — PASS
-
-The next challenge question was answered with an incorrect option.
+### Incorrect answer — PASS
 
 Observed:
 
-- HTTP `200`;
-- `correct: false`;
-- `correctIndex` matched the authoritative question data;
-- explanation returned as a string;
+- HTTP `200`,
+- `correct: false`,
+- expected `correctIndex`,
+- explanation returned,
 - `replayed: false`.
 
 ### Timeout — PASS
 
-The next challenge question was submitted with `selectedIndex: -1`.
+Request used `selectedIndex: -1`.
 
 Observed:
 
-- HTTP `200`;
-- `correct: false`;
-- expected `correctIndex`;
-- explanation returned as a string;
+- HTTP `200`,
+- `correct: false`,
+- expected `correctIndex`,
+- explanation returned,
 - `replayed: false`.
 
-This confirms the API/RPC timeout representation used by the current design.
+This confirms the current timeout representation.
 
-## 4. Runtime scenarios still not verified
+---
 
-The following scenarios have not yet been manually/runtime tested and must not be treated as confirmed:
+## 4. Runtime scenarios still not fully verified
 
-- missing anonymous cookie on `/api/quiz/answer`;
-- malformed anonymous cookie;
-- foreign, missing or `null` Origin where applicable;
-- invalid JSON and invalid request shapes;
-- extra request fields and query parameters;
-- `QUESTION_OUT_OF_ORDER` runtime response;
-- attempt owned by another anonymous identity on /api/quiz/answer (finish protection is verified in Stage 4);
-- `ATTEMPT_COMPLETED` behavior;
-- `ATTEMPT_EXPIRED` behavior;
-- simultaneous/concurrent requests from separate sessions;
-- forced rollback/atomicity failure scenario;
+The following answer/start edge cases must not be treated as manually confirmed unless separately tested later:
 
-## 5. Current checkpoint
+- malformed anonymous cookie,
+- foreign, missing or `null` Origin where applicable,
+- invalid JSON and invalid request shapes,
+- extra request fields and query parameters,
+- `QUESTION_OUT_OF_ORDER`,
+- foreign anonymous identity on `/api/quiz/answer`,
+- `ATTEMPT_COMPLETED` on answer,
+- `ATTEMPT_EXPIRED` on answer,
+- simultaneous/concurrent requests from separate sessions,
+- forced rollback/atomicity failure scenario.
 
-At this checkpoint, the following are verified in the development environment:
+Missing anonymous cookie protection **is confirmed for finish** in Stage 4 below.
 
-- the quiz-attempt migration and main SQL test suite execute successfully;
-- a browser can create an anonymous quiz attempt;
-- the same browser identity resumes the same attempt;
-- answers can be persisted server-side through the answer RPC;
-- identical answer retries are idempotent;
-- an accepted answer cannot be changed through the tested API flow;
-- questions outside the challenge are rejected;
-- correct, incorrect and timeout answers produce the expected feedback.
+---
 
-The frontend is now integrated with the `attemptId` answer contract and server-persisted resume flow. Result finalization was still pending at this checkpoint; see section 8 for completed Stage 4 verification.
-
-
-## 6. Stage 3 — frontend integration with quiz attempts
+## 5. Stage 3 checkpoint — frontend integration with quiz attempts
 
 ### Automated verification — PASS
 
-After the frontend integration was implemented:
+After frontend integration:
 
-- full TypeScript typecheck — **PASS**;
-- `npm.cmd run build` — **PASS**;
-- local test script — **28/28 PASS**;
+- full TypeScript typecheck — **PASS**,
+- `npm.cmd run build` — **PASS**,
+- local mocked test script — **28/28 PASS**,
 - `git diff --check` — **PASS**.
 
-The local tests used mocks and did not perform HTTP requests or Supabase mutations. They covered resume validation, shared in-flight attempt start, answer/replay contract, error handling, and rendering of both attempt summary states.
+The local tests used mocks and did not perform HTTP requests or Supabase mutations.
 
-Exactly five application files were changed in this stage:
+Covered:
 
-- `src/app/quiz/page.tsx`;
-- `src/components/QuestionScreen.tsx`;
-- `src/components/SummaryScreen.tsx`;
-- `src/services/quizService.ts`;
-- `src/types/quizAttempt.ts`.
-
-No SQL, RPC, result endpoint or `saveQuizResult` changes were part of Stage 3.
+- resume validation,
+- shared in-flight attempt start,
+- answer/replay contract,
+- error handling,
+- rendering attempt summary states.
 
 ### Manual browser verification — PASS
 
-The following browser flows were manually confirmed:
+Confirmed:
 
-- normal answer → feedback → “Next” transition;
-- after two persisted answers, F5 resumed at question 3;
-- F5 while feedback for question 3 was visible resumed at question 4, the first unanswered question;
-- after all five answers, the summary rendered correctly in `ready_to_finish`;
-- the attempts summary did not expose the legacy “Repeat” action or use the legacy result-save flow.
+- normal answer → feedback → next transition,
+- after two persisted answers, F5 resumed at question 3,
+- F5 during question 3 feedback resumed at question 4,
+- all five answers led to `ready_to_finish`,
+- attempts summary did not expose legacy “Repeat” behavior.
 
-This confirms the tested frontend path uses server-persisted attempt answers as the source of truth for resume. This stage intentionally does **not** call `finish_quiz_attempt`, so `ready_to_finish` must not be interpreted as `completed`.
+This confirmed that persisted server answers, not localStorage, control resume.
 
-## 7. Checkpoint after Stage 3
+---
 
-Verified at this checkpoint:
+## 6. Stage 4 — quiz-attempt finalization
 
-- anonymous attempt start/resume works;
-- answers are persisted server-side before feedback;
-- accepted answers are immutable in the tested API flow;
-- identical retries are idempotent;
-- the frontend sends `attemptId` with answers;
-- server-persisted answers are the source of truth for browser resume;
-- refresh after persisted answers resumes at the first unanswered question;
-- legacy local completion data no longer controls active quiz progress;
-- the five-answer flow reaches `ready_to_finish` without calling the old result-save flow.
+**Status: COMPLETE AND MANUALLY VERIFIED**
 
-Pending at the Stage 3 checkpoint (historical; Stage 4 completion is recorded in section 8):
+### Implementation verified
 
-- product integration of `finish_quiz_attempt`;
-- transition from `ready_to_finish` to `completed`;
-- completed-attempt resume through the final product flow;
-- manual coverage of remaining cookie/Origin/network/concurrency edge cases;
-- isolated concurrency and injected-failure atomicity tests.
+- `POST /api/quiz/attempt/finish` accepts exactly `{ attemptId, username }`.
+- Username is required, trimmed and limited to 20 Unicode code points.
+- Same-origin Origin validation is enforced.
+- Finish uses existing anonymous identity and does not create or refresh it.
+- Owner hash is derived server-side.
+- The only database call is `finish_quiz_attempt`.
+- Database calculates `score`, `totalQuestions` and `answersPattern`.
+- Client does not provide authoritative result values.
+- PostgreSQL atomically inserts result and updates `completed_at`.
+- Retry of completed attempt returns existing result.
+- `completed` state renders server result.
+- `footquiz_username` remains only a UX preference.
 
-## 8. Stage 4 - quiz-attempt finalization
+### Automated verification — PASS
 
-**The basic Stage 4 / quiz-attempt finalization flow is complete and manually verified.** The manual results below were reported by the project owner; this documentation update did not rerun HTTP requests or SQL.
+- full TypeScript typecheck — **PASS**,
+- `npm.cmd run build` — **PASS**,
+- **53 mocked tests — PASS**,
+- `git diff --check` — **PASS**.
 
-### Implementation
+### Manual Stage 4 verification — PASS
 
-- Added `POST /api/quiz/attempt/finish`; the JSON request contains exactly `{ attemptId, username }`.
-- Username is required, trimmed, and limited to 20 Unicode code points.
-- The endpoint requires a valid same-origin Origin, using the configured trusted origin policy.
-- Finish uses the existing anonymous identity from the HttpOnly cookie. It neither creates nor refreshes the identity/cookie; the owner hash is derived exclusively on the server.
-- Its only database call is the `finish_quiz_attempt` RPC.
-- The database calculates score, totalQuestions and answersPattern from persisted answers; these values are not accepted from the client.
-- PostgreSQL atomically inserts the result and updates `completed_at`. A retry of a completed attempt returns the existing quiz_result idempotently.
-- In `ready_to_finish`, the frontend offers a username form and result-save action. This state does not itself mean completed.
-- After confirmed finish, the frontend synchronizes through `/api/quiz/attempt/start`. Finish does not return or synthesize completedAt; the complete state and timestamp come from resume.
-- A failed resync after confirmed finish preserves the saved result and offers synchronization retry, without restoring the finalization form.
-- `completed` displays the server result without a form or Repeat action.
-- `footquiz_username` remains only a UX preference; localStorage is not authoritative for results or progress.
-- Legacy `/api/quiz/result` and `/quiz/result` remain reachable, but the current Daily Quiz attempts flow does not use them. Cleanup/decommission is a separate future step.
+#### Happy path
 
-### Automated verification - PASS
+A completed attempt was saved with username `Kuba`.
 
-- Full TypeScript typecheck - **PASS**.
-- `npm.cmd run build` - **PASS**.
-- **53 mocked tests - PASS**.
-- `git diff --check` - **PASS**.
+UI confirmed the saved result.
 
-The mocked tests cover request/identity validation, RPC error mapping, safe result mapping, retry payload preservation, duplicate-submit protection, and retaining confirmed results after resync/localStorage failures. They do not prove real database concurrency or forced rollback behavior.
+#### Completed resume
 
-### Manual Stage 4 tests - PASS
+After F5:
 
-#### 1. Happy path finalization - PASS
+- completed screen remained visible,
+- result was restored from server state.
 
-- The completed attempt was saved with username `Kuba`.
-- The UI displayed confirmation that the result was saved.
+#### Idempotent finish retry
 
-#### 2. Completed resume - PASS
+Attempt:
 
-- F5 after finalization kept the user on the completed result screen.
-- The result was restored from server state.
+`e4d286e7-0a40-4122-b63a-916943c23a85`
 
-#### 3. Idempotent finish retry - PASS
+Retry returned:
 
-Attempt ID: `e4d286e7-0a40-4122-b63a-916943c23a85`.
+- HTTP `200`,
+- `replayed: true`,
+- result ID `fc5569a6-a82e-4714-a157-061d7128478f`,
+- score `2`,
+- total questions `5`,
+- pattern `10001`,
+- username `Kuba`.
 
-A repeated POST to `/api/quiz/attempt/finish` returned:
+#### No duplicate `quiz_result`
 
-- HTTP `200`;
-- `replayed: true`;
-- result ID: `fc5569a6-a82e-4714-a157-061d7128478f`;
-- score: `2`;
-- totalQuestions: `5`;
-- answersPattern: `10001`;
-- username: `Kuba`.
+SQL lookup by the attempt ID returned exactly **1 record**.
 
-#### 4. No duplicate quiz_result - PASS
+This confirms sequential retry behavior, not real two-session concurrency.
 
-An SQL lookup by attempt_id `e4d286e7-0a40-4122-b63a-916943c23a85` returned exactly **1 record**. This confirms the tested sequential retry, not two-session concurrency.
+#### Incomplete attempt protection
 
-#### 5. Incomplete attempt protection - PASS
+Attempt:
 
-Attempt ID: `03730f15-8465-4ce4-ab16-4429e792a4f9`.
+`03730f15-8465-4ce4-ab16-4429e792a4f9`
 
-Finish before all questions were answered returned:
+Observed:
 
-- HTTP `409`;
-- `error.code: ATTEMPT_INCOMPLETE`.
+- HTTP `409`,
+- `ATTEMPT_INCOMPLETE`.
 
-#### 6. Foreign owner protection - PASS
+#### Foreign owner protection
 
-Finish from Edge for an attempt belonging to the anonymous Chrome identity returned:
+Finish from a different browser identity returned:
 
-- HTTP `403`;
-- `error.code: ATTEMPT_FORBIDDEN`.
+- HTTP `403`,
+- `ATTEMPT_FORBIDDEN`.
 
-#### 7. Missing anonymous cookie - PASS
+#### Missing anonymous cookie
 
-POST finish with `credentials: omit` returned:
+Finish with `credentials: omit` returned:
 
-- HTTP `401`;
-- `error.code: ANONYMOUS_IDENTITY_REQUIRED`.
+- HTTP `401`,
+- `ANONYMOUS_IDENTITY_REQUIRED`.
 
-### Known / deferred
+### Deferred
 
-The basic finalization flow is verified; the following are not marked complete:
+Still not considered verified:
 
-- Real two-session DB concurrency tests.
-- Forced failure/rollback between INSERT quiz_results and UPDATE completed_at. Procedures remain in `supabase/tests/quiz_attempts-concurrency.md`.
-- Cookie reset/incognito bypass remains an accepted MVP limitation.
-- The timer remains client-side and resets on refresh for an unresolved question.
-- UTC day boundaries remain a known limitation: start targets today's challenge; an open attempt from a previous UTC day cannot be finalized.
-- Cleanup/decommission of the legacy result routes is deferred.
+- real two-session DB concurrency,
+- forced failure/rollback between INSERT result and UPDATE `completed_at`,
+- broader Origin/malformed-cookie/network matrix.
 
-The remaining Origin, malformed-cookie and network edge cases are not promoted to manually verified by these seven tests.
+Accepted MVP limitations:
 
-## 9. Stage 5 - legacy result decommission
+- cookie reset/incognito bypass,
+- client-side timer,
+- UTC day boundary behavior.
 
-Legacy /api/quiz/result and /quiz/result Route Handlers, server/client saveQuizResult, legacy request types and SummaryScreen branches have been removed. SummaryScreen now supports attempts only.
+---
 
-The sole supported application write path is Daily Quiz → persisted attempt answers → POST /api/quiz/attempt/finish → finish_quiz_attempt → quiz_results with attempt_id. Stage 3/4 descriptions above are historical checkpoints; their statements that legacy routes remained reachable no longer describe the Stage 5 code.
+## 7. Stage 5 — legacy result decommission
 
-### Scope and database boundary
+**Status: COMPLETE AND MANUALLY VERIFIED**
 
-No SQL, migrations, schema, SQL tests or historical data were changed. Historical rows with attempt_id=NULL remain supported. service_role retains INSERT and finish_quiz_attempt remains SECURITY INVOKER; Stage 5 does not prohibit every direct database INSERT. DB-level hardening is deferred.
+Removed from application code:
 
-### Automated verification
+- `/api/quiz/result`,
+- `/quiz/result`,
+- `saveQuizResult`,
+- legacy request types,
+- legacy SummaryScreen branches.
 
-- Full TypeScript typecheck - **PASS**.
-- npm.cmd run build - **PASS**; neither legacy result route appears in the build route list.
-- Local regression script with mocked dependencies - **13 checks PASS**: finish/replay, identical retry, confirmed finish with failed resync/storage, completed resume, SummaryScreen visibility/sharing and unchanged ranking reads including historical rows.
-- Application source search - no legacy route, save function or request-type references; only finish RPC creates quiz_results.
-- git diff --check - **PASS**.
+The sole supported application result flow is now:
 
-The repository has no persisted application test runner/script; regression checks ran in memory using the existing Next.js compiler and mocks, with no network or SQL. The first build encountered stale generated .next/dev/types/validator.ts imports of removed routes; that generated file was removed and the build passed. No configuration change was required. No manual Stage 5 tests are claimed as PASS.
+```text
+Daily Quiz
+→ persisted attempt answers
+→ POST /api/quiz/attempt/finish
+→ finish_quiz_attempt
+→ quiz_results
+```
 
-### Manual verification - pending
+Historical rows with `attempt_id = NULL` remain supported.
 
-- Complete the quiz, finalize, then refresh the completed result.
-- Retry finish: same result, no duplicate.
-- POST old valid payloads to both removed routes: expected 404 after deploying the new build, no result insertion.
-- Browser Network uses only attempt/finish for result creation.
-- Ranking still shows historical and new results; NULL attempt_id rows are untouched.
-- Admin opens normally; summary sharing, nickname and identical retry still work.
-- Real two-session concurrency and forced rollback remain deferred, not covered by removing routes.
+### Automated verification — PASS
+
+- full TypeScript typecheck — **PASS**,
+- `npm.cmd run build` — **PASS**,
+- neither legacy route appears in build route list,
+- **13 mocked regression checks — PASS**,
+- application source contains no active references to:
+  - `saveQuizResult`,
+  - `QuizResultRequest`,
+  - `QuizAnswer`,
+  - `/api/quiz/result`,
+  - `/quiz/result`,
+- no direct application INSERT into `quiz_results`,
+- `git diff --check` — **PASS**.
+
+The first build encountered stale generated `.next/dev/types/validator.ts` references to removed routes. Removing that generated artifact resolved the issue; no config change was required.
+
+### Manual Stage 5 verification — PASS
+
+A full quiz was completed and finalized through the attempts flow.
+
+Observed:
+
+- result saved successfully,
+- username: `Kuba2`,
+- score: `3/5`.
+
+#### Completed refresh — PASS
+
+F5 after completion restored the completed result state correctly.
+
+#### Removed legacy endpoint `/api/quiz/result` — PASS
+
+POST request returned:
+
+- HTTP `404`.
+
+No legacy result save occurred.
+
+#### Removed legacy endpoint `/quiz/result` — PASS
+
+POST request returned:
+
+- HTTP `404`.
+
+No legacy result save occurred.
+
+#### Finish retry after Stage 5 — PASS
+
+Attempt:
+
+`6f1d177e-7d7f-4c72-9755-e8040d537d4e`
+
+Observed:
+
+- HTTP `200`,
+- `replayed: true`,
+- result ID `647085ea-d162-4762-bfba-b8e5ab03255f`,
+- score `3`,
+- total questions `5`,
+- answers pattern `01110`,
+- username `Kuba2`.
+
+This confirms that removing the legacy flow did not break idempotent finalization.
+
+### Scope boundary
+
+Stage 5 guarantees the result-write architecture at **application-code level**.
+
+It does not prove that every direct database write is impossible.
+
+`service_role` still has privileges required by the current `SECURITY INVOKER` RPC design. DB-level hardening remains a later security stage.
+
+---
+
+## 8. Stage 5.1 — server-side leaderboard
+
+**Status: COMPLETE AND MANUALLY VERIFIED**
+
+Leaderboard reads were moved from the browser to:
+
+`GET /api/quiz/leaderboard`
+
+The endpoint:
+
+- uses server-side Supabase access,
+- filters by current UTC date,
+- returns TOP 10,
+- exposes only:
+  - `id`,
+  - `username`,
+  - `score`,
+  - `totalQuestions`,
+- maps historical `username = NULL` to `Anonim`,
+- uses `Cache-Control: no-store`,
+- returns a safe generic error contract on DB failure.
+
+Frontend now:
+
+- calls the backend endpoint,
+- no longer SELECTs `quiz_results` directly,
+- has separate loading / empty / error states,
+- exposes retry on error.
+
+### Automated verification — PASS
+
+`tests/leaderboard.cjs` and related regression checks confirmed:
+
+- TOP 10 query behavior,
+- safe public mapping,
+- response field whitelist,
+- empty leaderboard behavior,
+- DB error behavior,
+- UI states,
+- retry behavior.
+
+Overall Stage 5.1 verification:
+
+- **16 regression checks — PASS**,
+- TypeScript typecheck — **PASS**,
+- `npm.cmd run build` — **PASS**,
+- endpoint registered in build,
+- `git diff --check` — **PASS**.
+
+### Manual Stage 5.1 verification — PASS
+
+Homepage displayed:
+
+`Kuba2 — 3/5`
+
+Network request:
+
+`GET /api/quiz/leaderboard`
+
+Observed:
+
+- HTTP `200`,
+- response contained the finalized result,
+- returned public object contained only:
+  - `id`,
+  - `username`,
+  - `score`,
+  - `totalQuestions`.
+
+Observed result:
+
+- result ID `647085ea-d162-4762-bfba-b8e5ab03255f`,
+- username `Kuba2`,
+- score `3`,
+- total questions `5`.
+
+This confirms the frontend ranking path works through the server endpoint and does not require direct browser access to `quiz_results`.
+
+### Security boundary
+
+Moving leaderboard reads server-side does **not** prove that old remote Supabase grants/RLS no longer expose `quiz_results`.
+
+That remains part of the dedicated security hardening stage.
+
+---
+
+## 9. Daily challenge availability — manual finding
+
+On 2026-09-11, `/api/quiz/attempt/start` initially returned:
+
+`404 DAILY_CHALLENGE_NOT_FOUND`
+
+This was not a regression in attempts/finalization.
+
+Cause:
+
+- `daily_challenges` had a row for 2026-09-10,
+- no row existed for 2026-09-11,
+- daily challenge publication is not yet automated.
+
+For development testing, today's challenge was manually created in Supabase by copying the previous day's `question_ids`.
+
+After that:
+
+- `/quiz` loaded successfully,
+- attempts flow worked normally.
+
+This finding directly motivated **Stage 6 — Automatic Daily Challenge**.
+
+---
+
+## 10. Current verified checkpoint
+
+At the end of Stage 5.1, the following are verified in the development environment:
+
+- quiz-attempt migration is applied,
+- anonymous start/resume works,
+- answers persist before feedback,
+- first accepted answer is immutable,
+- identical answer retry is idempotent,
+- timeout `-1` works,
+- completed result is calculated server-side,
+- finish is idempotent,
+- completed attempts resume after refresh,
+- legacy result endpoints are removed and return 404,
+- application result creation uses only attempts flow,
+- leaderboard is served through backend API,
+- frontend no longer directly reads `quiz_results`,
+- historical results remain compatible.
+
+Not yet verified / deliberately deferred:
+
+- real two-session concurrency,
+- injected DB failure between result insert and completion update,
+- full Origin/cookie/network edge matrix,
+- complete remote RLS/grants audit,
+- production deployment behavior,
+- automatic daily challenge generation.
+
+The next implementation stage is:
+
+**Stage 6 — Automatic Daily Challenge**
+
+Current roadmap: `ROADMAP.md`.
