@@ -1,317 +1,85 @@
 # Specyfikacja Techniczna: Analytics MVP (FootQuiz)
 
-## 1. Cel biznesowy
+## 1. Cel i status
 
-Analytics ma być gotowe przed soft-launchem i odpowiedzieć przede wszystkim na pytania:
+**Stage 7: DONE dla MVP.** Umami Cloud EU, plan Free; realna integracja została potwierdzona przez operatora. Analytics mierzy obserwowaną aktywność użytkowników ze zgodą, nie pełną populację graczy. Core D1/D7 pozostaje metryką produktową, ale jego dokładny raport jest świadomie odłożony.
 
-1. Ilu użytkowników wchodzi do Daily Quiz?
-2. Ilu faktycznie zaczyna quiz?
-3. Gdzie odpadają?
-4. Ilu kończy quiz?
-5. Ilu zapisuje wynik?
-6. Ilu wraca następnego dnia?
-7. Jaka jest retencja D1 i D7?
+## 2. Provider i architektura
 
-**North Star:** D1 i D7 retention oparte na faktycznej grze, nie na samym page view.
+Umami Cloud EU działa przez `AnalyticsProvider.tsx`, `analytics.ts`, `quizAnalytics.ts`, `analyticsIdentity.ts` i `analyticsState.ts`. Tracker ładuje się dopiero po zgodzie. Automatyczny tracking/pageviews jest wyłączony; wysyłamy pięć custom events. `identify()` poprzedza wysłanie eventów.
 
-Stage 7 ma pozostać mały. Nie budujemy jeszcze BI, A/B testów, session replay, heatmap, marketing automation ani własnej platformy analitycznej.
+Publiczna konfiguracja: `NEXT_PUBLIC_UMAMI_SCRIPT_URL` i `NEXT_PUBLIC_UMAMI_WEBSITE_ID`. Sekrety nie trafiają do browser bundle. Analytics jest best-effort, nie blokuje gameplayu i nie zmienia wyniku.
 
----
+## 3. Identity i consent — finalna decyzja A
 
-## 2. Decyzja narzędziowa
+Osobny losowy `analytics_id` jest zapisywany w localStorage dopiero po consent i przekazywany jako Distinct ID Umami. Nie jest powiązany z gameplay identity i nie daje dostępu do attempts.
 
-### Wybrany provider: Umami Cloud EU
+Gameplay startuje natychmiast, bez consent gate. Eventy przy `unknown` lub `rejected` są pomijane i nie są odtwarzane po późniejszym Accept. Pierwsza próba może nie mieć `quiz_started`, a późniejsze `question_answered` i `quiz_completed` mogą istnieć bez start eventu. To oczekiwane zachowanie privacy, nie bug transportu.
 
-Dla FootQuiz wybieramy **Umami Cloud EU** jako główne narzędzie Analytics MVP.
+Wycofanie zgody usuwa analytics identity, attribution i dedup oraz blokuje dalsze eventy. Nie zmienia gameplay cookie ani preferencji username. Zgoda udzielona przed eventem pozwala zachować go w ograniczonej kolejce podczas inicjalizacji providera; nie kolejkujemy historii sprzed zgody.
 
-Powody:
-- obsługuje custom events,
-- obsługuje funnels,
-- obsługuje retention,
-- jest prostsze niż PostHog dla małego MVP,
-- ma privacy-first / cookieless podejście,
-- można ograniczyć zakres danych wysyłanych do providera,
-- provider nie musi być rozsiany po aplikacji dzięki małej warstwie abstrakcji,
-- w razie potrzeby w przyszłości można przejść na bardziej rozbudowane rozwiązanie bez zmiany całej aplikacji.
+## 4. Event taxonomy
 
-### Dlaczego nie PostHog teraz
+| Event | Trigger | Properties |
+|---|---|---|
+| `quiz_viewed` | Wejście na /quiz, przed startem | opcjonalne UTM; bez wyliczania daty w browserze |
+| `quiz_started` | Udany start i validateAttemptResume; tylko in_progress z nextQuestionId | challenge_date, resumed, opcjonalne UTM |
+| `question_answered` | Potwierdzona odpowiedź backendu, także pierwszy potwierdzony replay | challenge_date, question_number 1..5, correct, timed_out |
+| `quiz_completed` | Autorytatywny sukces finish, przed resync | challenge_date, score, total_questions=5, opcjonalne UTM |
+| `leaderboard_viewed` | Wyrenderowany success rankingu, również pustego | brak |
 
-PostHog jest bardziej rozbudowany i może być lepszym wyborem później dla:
-- A/B testów,
-- feature flags,
-- zaawansowanych cohort,
-- eksperymentów onboardingowych,
-- bardziej złożonej segmentacji.
+Nie ma `result_saved`: zapis i finalizacja są jednym atomowym zdarzeniem biznesowym. Completed resume nie odtwarza completion, piąta odpowiedź go nie zastępuje, a błąd resync po successful finish go nie cofa. Daty pochodzą z backendu, dzień produktu to UTC.
 
-Na etapie soft-launchu FootQuiz byłby jednak szerszy niż obecne potrzeby.
+## 5. Deduplikacja i niezawodność
 
-### Vercel Analytics
+Lokalny rejestr analytics ma limit 512 wpisów. Klucze: wejście dla viewed, attempt dla started/completed, attempt + numer pytania dla answered. Identyfikatory w kluczach pozostają lokalne. Znacznik poprzedza próbę wysłania; preferujemy undercount zamiast duplikatów przy niepewnym wyniku. Kolejka pamięciowa ma limit 32 eventów.
 
-Nie jest częścią obowiązkowego Stage 7 MVP. Można go dodać później jako lekkie uzupełnienie ogólnego ruchu / Web Vitals, ale nie jest potrzebny do policzenia głównego lejka i retencji produktu.
-
----
-
-## 3. Zasada implementacyjna
-
-Kod aplikacji nie powinien bezpośrednio zależeć od API Umami w wielu miejscach.
-
-Preferowana warstwa:
-
-```ts
-track(eventName, properties)
-```
-
-Przykładowo:
-
-```ts
-track('quiz_completed', {
-  score: 4,
-  total_questions: 5,
-});
-```
-
-Provider ma być detalem implementacyjnym wewnątrz modułu analityki, np. `src/lib/analytics.ts`.
-
-Dzięki temu późniejsza zmiana providera nie wymaga przepisywania komponentów quizu.
-
----
-
-## 4. Anonymous identity
-
-### Istniejąca gameplay identity
-
-FootQuiz już posiada anonimową tożsamość do zabezpieczenia attempts:
-- losowy sekret w HttpOnly cookie,
-- SHA-256 tego sekretu przechowywany po stronie DB.
-
-Tych wartości **nie wolno używać jako analytics identity**.
-
-Nie wysyłamy do Umami:
-- `footquiz-anon` / dev cookie,
-- `anonymous_token_hash`,
-- sekretów Supabase,
-- username jako analytics identity.
-
-### Analytics identity
-
-Dla Analytics MVP preferowany jest **oddzielny, losowy `analytics_id`**, niezależny od gameplay identity.
-
-Cel:
-- pozwolić połączyć aktywność tego samego anonimowego gracza między dniami,
-- nie mieszać domeny bezpieczeństwa gameplay z analityką,
-- przygotować grunt pod późniejsze anonymous → authenticated identity linking.
-
-`analytics_id` nie powinien dawać żadnego dostępu do quizu, attempts ani konta.
-
-Szczegół mechanizmu persistence i integracji z Umami Distinct ID należy potwierdzić podczas implementacji Stage 7.
-
----
-
-## 5. Minimalny event taxonomy
-
-### `quiz_viewed`
-**Moment:** użytkownik dotarł do widoku Daily Quiz.  
-**Cel:** górna część lejka.
-
-Minimalne properties:
-- `challenge_date` lub równoważny bezpieczny identyfikator dnia,
-- opcjonalnie źródło/UTM, jeśli jest już dostępne w warstwie analityki.
-
-### `quiz_started`
-**Moment:** backend potwierdził utworzenie lub wznowienie realnego attemptu i UI przechodzi do aktywnej gry.  
-**Cel:** początek faktycznej aktywacji produktu.
-
-Minimalne properties:
-- `challenge_date`,
-- `resumed`: boolean.
-
-### `question_answered`
-**Moment:** odpowiedź została zaakceptowana i utrwalona przez backend.  
-**Cel:** mierzenie miejsca porzucenia quizu.
-
-Minimalne properties:
-- `question_number`: 1..5,
-- `correct`: boolean,
-- `timed_out`: boolean.
-
-Nie wysyłamy:
-- treści pytania,
-- options,
-- `selectedIndex`,
-- `correctIndex`,
-- explanation,
-- `questionId`, jeśli nie jest niezbędny do analizy MVP.
-
-### `quiz_completed`
-**Moment:** backend potwierdził ukończony attempt / wynik jest dostępny jako completed state.  
-**Cel:** najważniejszy event retencyjny.
-
-Minimalne properties:
-- `score`: 0..5,
-- `total_questions`: 5.
-
-Nie wysyłamy client-trusted czasu.
-
-### `result_saved`
-**Moment:** wynik został zapisany/finalized i użytkownik otrzymał potwierdzony rezultat.  
-**Cel:** mierzenie completion → saved result.
-
-Minimalne properties:
-- `score`,
-- `total_questions`.
-
-Nie wysyłamy username.
-
-### `leaderboard_viewed`
-**Moment:** użytkownik zobaczył poprawnie załadowany ranking.  
-**Cel:** zainteresowanie społeczną warstwą produktu.
-
-### Eventy odłożone
-
-`share_clicked` / `result_shared` trafiają do Stage 11 — Share / virality MVP, chyba że share flow zostanie wdrożony wcześniej.
-
-`match_predicted`, streak events, Auth events i achievementy są poza Stage 7.
-
----
+Retry/replayed może być pierwszym potwierdzeniem i wtedy emituje event. StrictMode, rerender i resume są chronione lokalnie. Nie gwarantujemy exactly-once między kartami, po usunięciu storage ani po wyparciu starych wpisów. Brak zgody, błędy storage, adblock i awaria providera mogą powodować niedoliczenie.
 
 ## 6. Funnel MVP
+
+Docelowa konfiguracja w Umami, timezone UTC:
 
 ```text
 quiz_viewed
 → quiz_started
-→ question_answered #1
-→ question_answered #2
-→ question_answered #3
-→ question_answered #4
-→ question_answered #5
+→ question_answered where question_number = 1
+→ question_answered where question_number = 2
+→ question_answered where question_number = 3
+→ question_answered where question_number = 4
+→ question_answered where question_number = 5
 → quiz_completed
-→ result_saved
 ```
 
-`question_number` pozwala używać jednego eventu zamiast pięciu nazw.
+Funnel reprezentuje obserwowaną ścieżkę consenting subset. Nie jest miarą całej populacji ani wszystkich ukończeń. Nie należy interpretować surowego ilorazu wszystkich completion/start jako konwersji pełnego funnelu: completion może nie mieć startu. Konfiguracja powyżej jest celem raportu, nie deklaracją wykonania testu dashboardowego funnelu.
 
-Najważniejsza metryka funnelowa:
+## 7. Core retention — definicja i backlog
 
-```text
-Completion Rate = quiz_completed / quiz_started
-```
+- Day 0: pierwszy **zaobserwowany** quiz_completed dla analytics identity; niekoniecznie pierwsze ukończenie quizu w produkcie.
+- Core D1: completion tej samej identity dokładnie następnego dnia UTC.
+- Core D7: completion dokładnie siódmego dnia UTC.
+- Wielokrotne completion jednego dnia liczą identity raz; niedojrzałe kohorty nie wchodzą do denominatora.
 
----
+Native Umami Retention nie realizuje dokładnej definicji FootQuiz. Obecny Umami Cloud Free nie daje API access. Operatorski raport API nie jest zaimplementowany; wróci po przejściu na Pro albo wyborze innego minimalnego źródła danych. Przyszły raport wymaga paginacji, powiązania event → sessionId → distinctId, kompletnej dostępnej historii oraz zagregowanego outputu bez surowych ID.
 
-## 7. Definicja retencji
+Nie dodajemy Supabase analytics ani hurtowni. To jawna limitation/backlog Free planu, nie blocker soft launchu. Reset storage/identity i brak zgody ograniczają obserwowaną retencję.
 
-### Day 0 cohort
-Do cohorty Day 0 wchodzi użytkownik, który po raz pierwszy wykonał `quiz_completed`.
+## 8. UTM
 
-### D1
-**Core D1:** ten sam użytkownik wykonuje `quiz_completed` następnego dnia.
+Current-touch, bez first-touch. Po zgodzie sessionStorage zachowuje `utm_source`, `utm_medium`, `utm_campaign`, `utm_content` przy przejściu / → /quiz. Nowe UTM zastępuje poprzednie. Wartości: 1..80 znaków ASCII liter/cyfr, underscore lub myślnik. Nie zapisujemy całego query ani referrera.
 
-Pomocniczo:
-**Return D1:** ten sam użytkownik wykonuje `quiz_started` następnego dnia.
+UTM trafia wyłącznie do quiz_viewed, quiz_started i quiz_completed. Wycofanie zgody usuwa attribution.
 
-### D7
-**Core D7:** `quiz_completed` siódmego dnia po Day 0.
+## 9. Minimalizacja danych
 
-North Star dla FootQuiz pozostaje oparta przede wszystkim o **Core D1 / Core D7**.
+Nie wysyłamy username, attemptId, questionId, selectedIndex, correctIndex, treści pytania/options/explanation, gameplay cookie, anonymous_token_hash ani sekretów Supabase. Publiczny payload jest whitelistowany; analytics identity pozostaje osobnym identyfikatorem.
 
----
+Bez Auth linking, session replay, heatmap, A/B testów, BI, share events i marketing automation. Informacje privacy dla publicznego wdrożenia powinny odzwierciedlać faktyczny consent i persistence.
 
-## 8. Attribution / UTM
+## 10. Weryfikacja i Definition of Done
 
-Minimalne parametry:
-- `utm_source`,
-- `utm_medium`,
-- `utm_campaign`,
-- opcjonalnie `utm_content`.
+Real smoke test operatora: script loaded po zgodzie, identify, quiz_viewed, question_answered, quiz_completed, leaderboard_viewed w dashboardzie i payload audit — PASS. Brak gameplay identifiers w sprawdzonych payloadach — PASS. Transport quiz_started potwierdzono po resume; fresh start przed zgodą jest poprawnie pomijany.
 
-Na Stage 7 trzeba co najmniej zachować możliwość przypisania pierwszego / bieżącego źródła ruchu do eventów potrzebnych do podstawowej analizy kanałów.
+Testy automatyczne obejmują whitelisty, consent, kolejkę przed readiness, realny lifecycle na mockach, dedup i błędy providera. Szczegóły: [testing.md](../testing.md).
 
-Nie rozbudowujemy jeszcze attribution modelu ponad potrzeby soft-launchu.
-
----
-
-## 9. Privacy / GDPR / ePrivacy
-
-Zasady MVP:
-- minimalizacja danych,
-- brak PII,
-- brak username w analytics,
-- brak gameplay secretów i hashy,
-- brak treści pytań i odpowiedzi,
-- brak session replay,
-- brak heatmaps,
-- brak reklamowego profilowania,
-- EU region providera.
-
-Umami ma privacy-first / cookieless podejście, ale wdrożenie osobnego trwałego `analytics_id` do D1/D7 trzeba traktować jako osobną decyzję privacy.
-
-Nie zapisujemy kategorycznego stwierdzenia „cookie banner nie jest potrzebny”. Przed publicznym ruchem należy sprawdzić finalny sposób persistence `analytics_id` i wynikające z niego obowiązki informacyjne / consent w kontekście Polski i UE.
-
----
-
-## 10. Ochrona przed błędnymi eventami
-
-Zasady:
-- event failure nie blokuje quizu,
-- trackowanie jest best-effort,
-- Strict Mode / retry / refresh nie powinny generować oczywistych duplikatów kluczowych eventów,
-- `quiz_started`, `question_answered`, `quiz_completed`, `result_saved` powinny być emitowane dopiero po potwierdzeniu odpowiedniej akcji przez backend,
-- nie polegamy na kliknięciu klienta jako źródle prawdy dla ukończenia i wyniku.
-
----
-
-## 11. Test plan Stage 7
-
-Automatycznie / mocked:
-- eventy wywołują się tylko w oczekiwanych stanach,
-- retry nie duplikuje kluczowych eventów,
-- safe properties whitelist,
-- brak secretów / hashy / username / question content w payloadzie,
-- analytics failure nie blokuje flow.
-
-Manualnie:
-- realne eventy pojawiają się w Umami Cloud EU,
-- funnel ma prawidłową kolejność,
-- jeden ukończony quiz generuje oczekiwany zestaw eventów,
-- refresh/resume nie produkuje oczywistych duplikatów,
-- payloady są przejrzane w DevTools,
-- test powrotu tego samego `analytics_id` potwierdza możliwość liczenia D1.
-
----
-
-## 12. Scope Stage 7
-
-W Stage 7 implementujemy tylko:
-- Umami Cloud EU,
-- cienką warstwę `track(...)`,
-- anonymous analytics identity,
-- minimalne eventy produktu,
-- funnel,
-- D1/D7 retention,
-- podstawowe UTM attribution.
-
-Nie implementujemy:
-- Auth,
-- streaków,
-- achievements,
-- Typera Dnia,
-- share flow,
-- A/B tests,
-- session replay,
-- heatmaps,
-- marketing automation,
-- własnej hurtowni analytics,
-- rozbudowanego BI.
-
----
-
-## 13. Definition of Done
-
-Stage 7 jest DONE, gdy:
-- Umami Cloud EU działa w środowisku docelowym,
-- kluczowe eventy są wysyłane bez danych wrażliwych,
-- potrafimy zbudować funnel Daily Quiz,
-- potrafimy policzyć Core D1 i Core D7 dla anonimowego użytkownika,
-- źródło ruchu / UTM jest dostępne do podstawowej segmentacji,
-- implementacja nie wpływa na niezawodność quizu,
-- manualny dashboard smoke test przechodzi.
+MVP DONE oznacza działającą realną integrację i zaakceptowane ograniczenia consent/Free. Nie oznacza gotowego raportu Core D1/D7 ani potwierdzonej konfiguracji pełnego funnelu. Te elementy pozostają w backlogu raportowania.

@@ -122,59 +122,29 @@ Szczegóły: `docs/testing.md`.
 ---
 
 ## Stage 7 — Analytics MVP
-**Status: NEXT — HIGH PRIORITY**
+**Status: DONE (MVP)**
 
-### Dlaczego teraz
-North Star to D1/D7. Start bez analytics oznacza utratę danych z pierwszych użytkowników.
+### Ukończony zakres
+- Umami Cloud EU / Free, real integration verified przez operatora,
+- osobna random analytics identity w localStorage po consent, Distinct ID bez gameplay identity,
+- pięć eventów: quiz_viewed, quiz_started, question_answered, quiz_completed, leaderboard_viewed,
+- current-touch UTM w sessionStorage po zgodzie,
+- whitelist payloadów, lokalny dedup i ograniczona kolejka,
+- real smoke test i payload audit PASS.
 
-### Podjęta decyzja
-- provider: **Umami Cloud EU**,
-- cienka warstwa `track(...)`,
-- oddzielna `analytics_id`, niezależna od gameplay cookie/hash,
-- privacy-first i minimalizacja danych,
-- bez session replay, heatmap i A/B testów na MVP.
+### Finalna decyzja consent
+Wariant A: gameplay bez gate. Eventy unknown/rejected są pomijane bez odtwarzania po Accept. Start może nie istnieć dla pierwszej próby; completion może istnieć bez startu. Funnel dotyczy obserwowanego consenting subset.
 
-### Minimalny event taxonomy
-- `quiz_viewed`,
-- `quiz_started`,
-- `question_answered`,
-- `quiz_completed`,
-- `result_saved`,
-- `leaderboard_viewed`.
+### Retention i backlog raportowania
+Core D1/D7 pozostaje celem produktowym: Day 0 = pierwszy zaobserwowany quiz_completed, powroty dokładnie +1/+7 dni UTC. Native Umami Retention nie realizuje dokładnej definicji. Free nie daje API access; operatorski raport odłożony do Pro lub innego minimalnego źródła danych. Bez nowej hurtowni i Supabase analytics. Ograniczenie nie blokuje soft launchu.
 
-`share_clicked` / `result_shared` pozostają w Stage 11 razem z właściwym share flow.
+Docelowy funnel: viewed → started → answered #1..#5 → completed. Konfiguracja/weryfikacja pełnego raportu pozostaje zadaniem operatorskim; nie deklarujemy jej jako testu PASS.
 
-### Retention
-- Day 0 cohort: pierwsze `quiz_completed`,
-- Core D1: `quiz_completed` następnego dnia,
-- Core D7: `quiz_completed` siódmego dnia,
-- pomocniczo Return D1/D7 przez `quiz_started`.
+### Definition of Done MVP
+Realne eventy i bezpieczne payloady działają, gameplay pozostaje niezależny od analytics, ograniczenia consent i Free są zaakceptowane i udokumentowane. Nie wymagamy raportu API do MVP.
 
-### Minimalny zakres
-- integracja Umami Cloud EU,
-- anonymous analytics identity,
-- bezpieczna abstrakcja `track(...)`,
-- eventy kluczowego lejka,
-- funnel,
-- D1/D7,
-- podstawowe UTM attribution,
-- ochrona przed oczywistymi duplikatami Strict Mode / retry / refresh,
-- manualny dashboard smoke test.
-
-### Privacy
-Do analytics nie wysyłamy:
-- gameplay cookie,
-- `anonymous_token_hash`,
-- username jako identity,
-- sekretów Supabase,
-- treści pytań, odpowiedzi i explanation.
-
-Finalny sposób persistence `analytics_id` trzeba sprawdzić także pod kątem obowiązków privacy/consent przed publicznym ruchem.
-
-### Definition of Done
-Po starcie potrafimy policzyć podstawowy funnel, Core D1/D7 i podstawowe źródła ruchu, a payloady analytics nie zawierają danych wrażliwych.
-
-Spec: `docs/specs/analytics-specification.md`.
+Spec: [analytics-specification.md](docs/specs/analytics-specification.md). Testy: [testing.md](docs/testing.md).
+Share events nadal należą do Stage 11; bez Auth, heatmap, session replay i A/B tests.
 
 ---
 
@@ -378,7 +348,7 @@ Nie każdy punkt jest blockerem soft-launchu.
 FootQuiz jest gotowy do pierwszego kontrolowanego soft-launchu, gdy:
 
 - [x] Daily tworzy się automatycznie każdego dnia — publisher, fallback i Cron potwierdzone na development,
-- [ ] podstawowe analytics działają,
+- [x] podstawowe analytics działają,
 - [ ] publiczny attack surface i `/admin` są zabezpieczone,
 - [ ] mamy zweryfikowaną pulę pytań na okres testu,
 - [ ] pełny flow start → answers → finish → resume działa produkcyjnie,

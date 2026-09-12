@@ -51,8 +51,8 @@ async function compile(file, mocks = {}) {
   const react = { createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }),
     useState(initial) { const i = cursor++; if (!(i in states)) states[i] = initial;
       return [states[i], value => { states[i] = value; }]; },
-    useCallback: fn => fn, useEffect: fn => { effect = fn; } };
-  const Page = (await compile('src/app/page.tsx', { react,
+    useRef: value => ({current:value}), useCallback: fn => fn, useEffect: (fn,deps) => { if(deps.length === 1) effect = fn; } };
+  const Page = (await compile('src/app/page.tsx', { react, '@/lib/quizAnalytics': {leaderboardViewed(){}}, '@/lib/analyticsState': {captureAttribution(){}},
     '@/services/quizService': { getTodayLeaderboard: async () => { count++; if (fail) throw Error('unavailable'); return entries; } },
     'next/link': () => null, 'lucide-react': {} })).default;
   const render = () => { cursor = 0; return Page(); };

@@ -1,12 +1,16 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { Play, Trophy, Calendar, Zap, TrendingUp, Loader2 } from 'lucide-react';
 import { getTodayLeaderboard, LeaderboardEntry } from '@/services/quizService';
 
+import { leaderboardViewed } from '@/lib/quizAnalytics';
+import { captureAttribution } from '@/lib/analyticsState';
+
 export default function HomePage() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const analyticsVisit = useRef<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [leaderboardError, setLeaderboardError] = useState(false);
 
@@ -34,8 +38,17 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
+    captureAttribution();
     void loadLeaderboard();
   }, [loadLeaderboard]);
+
+  useEffect(() => {
+    if (loading || leaderboardError) return;
+    try {
+      analyticsVisit.current ??= crypto.randomUUID();
+      leaderboardViewed(analyticsVisit.current);
+    } catch { /* Optional telemetry. */ }
+  }, [loading, leaderboardError]);
 
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">

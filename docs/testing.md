@@ -641,4 +641,44 @@ SQL test transactions end with ROLLBACK. If SQL Editor stops after an error, rol
 
 Postgres emergency access still obeys CHECK/FK constraints. Application service_role cannot UPDATE/DELETE/TRUNCATE daily_challenges. Question content remains mutable; operators should avoid editing published/approved content. Five approved questions support the MVP without hard rotation, but do not establish content variety or factual quality.
 
-Stage 6 is complete; the next roadmap stage is **Stage 7 — Analytics MVP**.
+Historical Stage 6 handoff: the next roadmap stage was **Stage 7 — Analytics MVP**.
+
+## Stage 7 — Analytics MVP final cleanup
+
+**Status: DONE for MVP.** Provider: Umami Cloud EU, Free plan. Real smoke evidence below was reported by the operator; this cleanup did not send new real events.
+
+### Final consent decision A
+Gameplay starts immediately without a consent gate. Events at unknown/rejected consent are skipped, never replayed after Accept. Therefore the first attempt can lack quiz_started while later answers/completion exist. The funnel describes the observed consenting subset, not all players.
+
+The missing fresh quiz_started was traced to consent being missing at start, followed by a later successful Accept. This was expected privacy behavior, not a transport, hydration or queue bug. Temporary development diagnostics were removed without changing event lifecycle.
+
+### Real smoke test — operator confirmed
+| Check | Status |
+|---|---|
+| Tracker script loads after consent | PASS |
+| Real Umami identify / separate Distinct ID | PASS |
+| quiz_viewed | PASS |
+| question_answered | PASS |
+| quiz_completed | PASS |
+| leaderboard_viewed visible in dashboard | PASS |
+| Payload audit / no gameplay identifiers | PASS |
+| quiz_started transport/provider on resume after consent | PASS |
+
+A fresh start without prior consent is correctly omitted. These results do not assert that the complete dashboard funnel or real D1/D7 report has been tested.
+
+### Automated cleanup verification
+- Analytics: 26 mocked tests PASS, including accepted consent + confirmed new/partial attempt before provider readiness; gameplay proceeds, exactly one start after identify, no attemptId in payload, StrictMode/resume dedup.
+- Daily/regression: 21 mocked tests PASS.
+- Leaderboard: 16 mocked checks PASS.
+- Full TypeScript typecheck: PASS.
+- npm.cmd run build: PASS.
+- git diff --check: PASS.
+
+Mocked checks are not evidence of Cloud delivery; real delivery evidence is listed separately above.
+
+### Final model and deferred reporting
+Five events only: quiz_viewed, quiz_started, question_answered, quiz_completed, leaderboard_viewed. No result_saved. Random analytics_id persists in localStorage only after consent, independent of gameplay identity. UTM current-touch uses sessionStorage after consent; source/medium/campaign/content appear only on viewed/started/completed.
+
+Core D1/D7 Day 0 is the first observed quiz_completed for an analytics identity, not necessarily its first product completion. Native Retention is not the exact FootQuiz metric. Umami Cloud Free has no API access; the operator API report and its tests remain DEFERRED until Pro or another minimal data source is chosen. No Supabase analytics or warehouse is introduced. Configure/verify the full property-filtered UTC funnel separately; do not label it PASS from event smoke alone.
+
+Free/reporting limitations do not block Stage 7 MVP. Existing real DB concurrency and forced rollback tests remain DEFERRED.

@@ -6,8 +6,11 @@ import type { PersistedQuizAnswer } from '@/types/quizAttempt';
 import { QuizApiError, recordAttemptAnswer } from '@/services/quizService';
 import { Timer, CheckCircle2, XCircle, ChevronRight } from 'lucide-react';
 
+import { questionAnswered } from '@/lib/quizAnalytics';
+
 interface QuestionScreenProps {
   attemptId: string;
+  challengeDate: string;
   question: PublicQuestion & { id: string };
   questionNumber: number;
   totalQuestions: number;
@@ -18,7 +21,7 @@ interface QuestionScreenProps {
 }
 
 export default function QuestionScreen({
-  attemptId, question, questionNumber, totalQuestions,
+  attemptId, challengeDate, question, questionNumber, totalQuestions,
   onRecorded, onNext, onSynchronize, timeLimit = 15,
 }: QuestionScreenProps) {
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
@@ -48,6 +51,7 @@ export default function QuestionScreen({
     setCanRetry(false);
     try {
       const result = await recordAttemptAnswer({ attemptId, questionId: question.id, selectedIndex });
+      questionAnswered(attemptId, challengeDate, questionNumber, result.correct, selectedIndex === -1);
       if (!mounted.current) return;
       // Both a first acceptance and replay confirm the persisted choice.
       onRecorded({ questionId: question.id, selectedIndex, correct: result.correct });
@@ -78,7 +82,7 @@ export default function QuestionScreen({
       pending.current = false;
       if (mounted.current) setIsCheckingAnswer(false);
     }
-  }, [attemptId, question.id, onRecorded, onSynchronize]);
+  }, [attemptId, challengeDate, questionNumber, question.id, onRecorded, onSynchronize]);
 
   const handleSelect = useCallback((index: number) => {
     // Synchronous guard also covers a click racing with the timeout.

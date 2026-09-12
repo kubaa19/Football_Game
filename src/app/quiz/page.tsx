@@ -6,6 +6,7 @@ import SummaryScreen from '@/components/SummaryScreen';
 import type { PublicQuestion } from '@/types/quiz';
 import type { PersistedQuizAnswer, QuizAttemptStartResponse, QuizAttemptFinishRequest, QuizAttemptFinishResponse } from '@/types/quizAttempt';
 import { getDailyQuestions, startDailyAttempt, validateAttemptResume, finishQuizAttempt, QuizApiError } from '@/services/quizService';
+import { quizViewed, quizStarted, quizCompleted } from '@/lib/quizAnalytics';
 import { Loader2 } from 'lucide-react';
 
 export default function QuizContainer() {
@@ -15,6 +16,7 @@ export default function QuizContainer() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const generation = useRef(0);
+  const analyticsVisit = useRef<string | null>(null);
   const [confirmedFinish, setConfirmedFinish] = useState<QuizAttemptFinishResponse | null>(null);
   const [finishPending, setFinishPending] = useState(false);
   const [finishError, setFinishError] = useState<string | null>(null);
@@ -45,6 +47,7 @@ export default function QuizContainer() {
       setQuestions(restored.questions);
       setAttempt(restored.attempt);
       setDisplayedId(restored.attempt.nextQuestionId);
+      quizStarted(restored.attempt);
     } catch (error) {
       if (current === generation.current) {
         if (error instanceof QuizApiError && error.code === 'DAILY_CHALLENGE_UNAVAILABLE') {
@@ -59,6 +62,10 @@ export default function QuizContainer() {
   }, []);
 
   useEffect(() => {
+    try {
+      analyticsVisit.current ??= crypto.randomUUID();
+      quizViewed(analyticsVisit.current);
+    } catch { /* Analytics must not block start. */ }
     void synchronize();
     return () => { generation.current++; };
   }, [synchronize]);
@@ -151,6 +158,7 @@ export default function QuizContainer() {
       if (current === generation.current) setFinishPending(false);
     }
     if (current !== generation.current) return;
+    quizCompleted(confirmation);
     setConfirmedFinish(confirmation);
     setDisplayedId(null);
     try { localStorage.setItem('footquiz_username', confirmation.result.username); } catch { /* optional preference */ }
@@ -198,6 +206,7 @@ export default function QuizContainer() {
           <QuestionScreen
             key={attempt.attemptId + ':' + displayedId}
             attemptId={attempt.attemptId}
+            challengeDate={attempt.challengeDate}
             question={questions[currentIndex]}
             questionNumber={currentIndex + 1}
             totalQuestions={questions.length}

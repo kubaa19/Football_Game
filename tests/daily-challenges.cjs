@@ -90,7 +90,7 @@ const db={
  // Actual page error branch with hooks mocked; not an end-to-end browser test.
  const service=await compile('src/services/quizService.ts',{});let values=[],cursor=0,effect;
  const React={createElement:(type,props,...children)=>({type,props,children}),useState:initial=>{const i=cursor++;if(!(i in values))values[i]=initial;return [values[i],v=>values[i]=v];},useRef:v=>({current:v}),useCallback:f=>f,useEffect:f=>{effect=f;}};
- const Page=(await compile('src/app/quiz/page.tsx',{react:React,'lucide-react':{},'@/components/QuestionScreen':()=>null,'@/components/SummaryScreen':()=>null,'@/services/quizService':{...service,startDailyAttempt:async()=>{throw new service.QuizApiError('DAILY_CHALLENGE_UNAVAILABLE');}}})).default;
+ const Page=(await compile('src/app/quiz/page.tsx',{'@/lib/quizAnalytics':{quizViewed(){},quizStarted(){},quizCompleted(){}},react:React,'lucide-react':{},'@/components/QuestionScreen':()=>null,'@/components/SummaryScreen':()=>null,'@/services/quizService':{...service,startDailyAttempt:async()=>{throw new service.QuizApiError('DAILY_CHALLENGE_UNAVAILABLE');}}})).default;
  await test('UI unavailable message',async()=>{Page();effect();await new Promise(r=>setImmediate(r));cursor=0;assert.ok(JSON.stringify(Page()).includes('Dzisiejszy quiz jest chwilowo'));});
  console.log(`PASS: ${passed} tests; no HTTP or SQL executed. RPC rules/identity mocked.`);
 })().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>{global.Date=RealDate;});

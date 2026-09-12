@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import AnalyticsProvider from '@/components/AnalyticsProvider';
 
 export const metadata: Metadata = {
   title: 'FootQuiz',
@@ -13,7 +14,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pl">
-      <body>{children}</body>
+      <body>{children}<AnalyticsProvider /></body>
     </html>
   );
 }

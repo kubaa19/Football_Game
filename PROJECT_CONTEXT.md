@@ -160,31 +160,17 @@ Walidacja techniczna nie zastępuje ręcznej kontroli faktograficznej.
 
 ---
 
-## 8. Analytics — Stage 7 NEXT
+## 8. Analytics — Stage 7 DONE (MVP)
 
-Podjęta decyzja:
-- **Umami Cloud EU**,
-- cienka abstrakcja `track(...)`,
-- oddzielna `analytics_id`, niezależna od gameplay cookie/hash,
-- minimalizacja danych,
-- bez session replay, heatmap i A/B testów na MVP.
+Umami Cloud EU, plan Free; real integration verified przez operatora. Osobny losowy analytics_id w localStorage wyłącznie po consent, przekazywany jako Distinct ID, bez powiązania z gameplay identity.
 
-Minimalne eventy:
-- `quiz_viewed`,
-- `quiz_started`,
-- `question_answered`,
-- `quiz_completed`,
-- `result_saved`,
-- `leaderboard_viewed`.
+Eventy: quiz_viewed, quiz_started, question_answered, quiz_completed, leaderboard_viewed. Bez result_saved. Payloady nie zawierają gameplay identifiers, username, treści pytań ani sekretów.
 
-North Star:
-- Day 0: pierwsze `quiz_completed`,
-- Core D1: `quiz_completed` następnego dnia,
-- Core D7: `quiz_completed` siódmego dnia.
+Finalna decyzja A: bez consent gate i bez zmiany gameplayu. Unknown/rejected oznacza pominięcie eventu, bez replay po Accept. Completion może istnieć bez wcześniejszego startu; funnel mierzy obserwowany consenting subset. UTM current-touch w sessionStorage po zgodzie, tylko na viewed/started/completed.
 
-Nie wysyłamy do analytics gameplay cookie/hash, username jako identity, sekretów Supabase ani treści pytań/odpowiedzi.
+Core D1/D7: Day 0 to pierwszy zaobserwowany quiz_completed, powroty dokładnie +1/+7 dni UTC. Native Retention nie realizuje tej definicji. Free nie daje API access; raport operatorski odłożony do Pro lub innego minimalnego źródła, bez Supabase analytics/hurtowni. Nie blokuje MVP.
 
-Spec: `docs/specs/analytics-specification.md`.
+Spec: [analytics-specification.md](docs/specs/analytics-specification.md).
 
 ---
 
@@ -229,7 +215,7 @@ Stage 6 stabilizuje publikację challenge, ale pełne versioning/freeze treści 
 - brak kompletnego audytu RLS/grantów,
 - brak pełnej automatycznej factual validation,
 - realny test concurrency dwóch sesji DB i forced rollback pozostają DEFERRED,
-- analytics ma gotową decyzję/specyfikację, ale nie jest jeszcze zaimplementowane.
+- analytics MVP działa; dokładny raport Core D1/D7 jest odłożony z powodu braku API na Free.
 
 ---
 
